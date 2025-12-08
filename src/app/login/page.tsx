@@ -13,13 +13,12 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 const FALLBACK_APP_ORIGIN = "http://localhost:3000"
 
 function getAppOrigin() {
-  // Prefer an explicit origin so deployments behind proxies don't fall back to localhost.
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin
+  }
   const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "")
   if (configuredOrigin) {
     return configuredOrigin
-  }
-  if (typeof window !== "undefined" && window.location?.origin) {
-    return window.location.origin
   }
   return FALLBACK_APP_ORIGIN
 }
