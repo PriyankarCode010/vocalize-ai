@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 
-const FALLBACK_APP_ORIGIN = "http://localhost:3000"
+const FALLBACK_APP_ORIGIN = "https://vocalize-ai-mu.vercel.app/"
 
 function getAppOrigin() {
   if (typeof window !== "undefined" && window.location?.origin) {
