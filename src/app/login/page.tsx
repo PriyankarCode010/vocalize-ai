@@ -71,6 +71,8 @@ export default function LoginPage() {
     }
   }
 
+  //supabase auth hai na? yep
+
   const handleGoogleLogin = async () => {
     if (!supabase) {
       setStatus("error")
@@ -83,12 +85,13 @@ export default function LoginPage() {
 
     try {
       const returnTo = redirectParam || "/demo"
-      const redirectOrigin = getAppOrigin()
-      console.log("[login] launching Google OAuth", { returnTo, redirectOrigin })
+      const callbackUrl = new URL("/api/auth/callback", getAppOrigin())
+      callbackUrl.searchParams.set("next", returnTo)
+      console.log("[login] launching Google OAuth", { returnTo, callbackUrl: callbackUrl.toString() })
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${redirectOrigin}/auth/callback?next=${encodeURIComponent(returnTo)}`,
+          redirectTo: callbackUrl.toString(),
         },
       })
 
