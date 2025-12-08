@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 
-const FALLBACK_APP_ORIGIN = "https://vocalize-ai-mu.vercel.app/"
+const FALLBACK_APP_ORIGIN = "https://vocalize-ai-mu.vercel.app"
 
 function getAppOrigin() {
   if (typeof window !== "undefined" && window.location?.origin) {
@@ -33,6 +33,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("")
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle")
   const [message, setMessage] = useState<string | null>(null)
+
   const supabase = useMemo(() => {
     try {
       return getSupabaseBrowserClient()
@@ -46,23 +47,22 @@ export default function LoginPage() {
     event.preventDefault()
     setStatus("submitting")
     setMessage(null)
-    console.log("[login] submitting email/password login", { redirectParam })
 
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: email.trim(), password }),
       })
 
+      const data = await response.json().catch(() => ({}))
+
       if (!response.ok) {
-        const data = await response.json().catch(() => ({}))
         throw new Error(data.error || "Unable to sign in.")
       }
 
       setStatus("success")
       const nextDestination = redirectParam || "/demo"
-      console.log("[login] email/password login success, redirecting", { nextDestination })
       router.push(nextDestination)
     } catch (error) {
       setStatus("error")
@@ -70,8 +70,6 @@ export default function LoginPage() {
       console.error("[login] email/password login failed", error)
     }
   }
-
-  //supabase auth hai na? yep
 
   const handleGoogleLogin = async () => {
     if (!supabase) {
@@ -87,7 +85,6 @@ export default function LoginPage() {
       const returnTo = redirectParam || "/demo"
       const callbackUrl = new URL("/api/auth/callback", getAppOrigin())
       callbackUrl.searchParams.set("next", returnTo)
-      console.log("[login] launching Google OAuth", { returnTo, callbackUrl: callbackUrl.toString() })
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -98,7 +95,6 @@ export default function LoginPage() {
       if (error) {
         throw error
       }
-      console.log("[login] Supabase signInWithOAuth invoked successfully")
     } catch (error) {
       setStatus("error")
       setMessage(error instanceof Error ? error.message : "Unable to start Google sign in.")
@@ -114,7 +110,9 @@ export default function LoginPage() {
             Welcome Back
           </Badge>
           <h1 className="text-2xl font-semibold">Log in to SignSpeak</h1>
-          <p className="text-sm text-muted-foreground">Use email credentials below or continue with Google via Supabase Auth.</p>
+          <p className="text-sm text-muted-foreground">
+            Use email credentials below or continue with Google via Supabase Auth.
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -126,6 +124,7 @@ export default function LoginPage() {
               id="email"
               type="email"
               placeholder="you@example.com"
+              autoComplete="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               required
@@ -140,6 +139,7 @@ export default function LoginPage() {
               id="password"
               type="password"
               placeholder="Minimum 6 characters"
+              autoComplete="current-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               required
@@ -156,7 +156,13 @@ export default function LoginPage() {
           </Button>
         </form>
 
-        <Button type="button" variant="outline" className="w-full" onClick={handleGoogleLogin} disabled={status === "submitting" || !supabase}>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={handleGoogleLogin}
+          disabled={status === "submitting" || !supabase}
+        >
           Continue with Google
         </Button>
 
