@@ -171,7 +171,7 @@ export default function HomePage() {
                 <div>
                   <h3 className="text-xl font-semibold text-foreground mb-2">Capture Hand Signs</h3>
                   <p className="text-muted-foreground">
-                    Use your device's camera to capture hand signs in real-time with our advanced computer vision
+                    Use your device&apos;s camera to capture hand signs in real-time with our advanced computer vision
                     technology.
                   </p>
                 </div>

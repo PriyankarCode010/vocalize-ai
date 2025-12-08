@@ -20,17 +20,20 @@ export async function GET(request: Request) {
 
   const supabase = await getSupabaseServerClient()
   const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+  const session = data.session
+  const user = session?.user
 
-  if (error || !data.session?.user?.email) {
+  if (error || !session || !user || !user.email) {
     const errorUrl = new URL("/login", request.url)
     errorUrl.searchParams.set("error", error?.message ?? "Unable to complete Google sign in.")
     return NextResponse.redirect(errorUrl)
   }
 
-  const user = data.session.user
+  // `user.email` is guaranteed by the guard above, so assert non-null here.
+  const email = user.email!
   const profile = {
-    email: user.email,
-    name: (user.user_metadata?.full_name as string | undefined) || user.email,
+    email,
+    name: (user.user_metadata?.full_name as string | undefined) ?? email,
   }
 
   const destinationUrl = new URL(next, request.url)

@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -43,7 +44,7 @@ export default function HandSignRecognition() {
   const [stableConfidence, setStableConfidence] = useState<number | null>(null)
   const [stableStreak, setStableStreak] = useState(0)
   const [sequenceHistory, setSequenceHistory] = useState<string[]>([])
-  const imgRef = useRef<HTMLImageElement | null>(null)
+  const [annotatedFrame, setAnnotatedFrame] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const lastSequenceRef = useRef<string | null>(null)
   const lastFramePredictionRef = useRef<string | null>(null)
@@ -167,8 +168,8 @@ export default function HandSignRecognition() {
             return
           }
 
-          if (data.image && imgRef.current) {
-            imgRef.current.src = `data:image/jpeg;base64,${data.image}`
+          if (typeof data.image === "string") {
+            setAnnotatedFrame(`data:image/jpeg;base64,${data.image}`)
           }
 
           const newPrediction = data.prediction || "No Hand"
@@ -264,9 +265,7 @@ export default function HandSignRecognition() {
           return words.slice(-20).join(" ")
         })
 
-        if (imgRef.current) {
-          imgRef.current.src = sampleImages[index % sampleImages.length]
-        }
+        setAnnotatedFrame(sampleImages[index % sampleImages.length])
 
         index += 1
       }, 1800)
@@ -386,11 +385,14 @@ export default function HandSignRecognition() {
                     cameraReady ? "opacity-100" : "opacity-0"
                   }`}
                 />
-                {shouldUseLiveWS && (
-                  <img
-                    ref={imgRef}
+                {shouldUseLiveWS && annotatedFrame && (
+                  <Image
                     alt="YOLO11 annotated frames"
-                    className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${
+                    src={annotatedFrame}
+                    fill
+                    unoptimized
+                    sizes="(max-width: 1024px) 100vw, 50vw"
+                    className={`object-cover transition-opacity duration-300 ${
                       connected ? "opacity-100" : "opacity-30"
                     }`}
                   />

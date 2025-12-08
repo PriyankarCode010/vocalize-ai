@@ -49,7 +49,7 @@ export default function CallRoom({ roomId, userName = "Guest" }: CallRoomProps) 
   const [microphoneEnabled, setMicrophoneEnabled] = useState(true)
   const [cameraEnabled, setCameraEnabled] = useState(true)
   const [showAssistPanel, setShowAssistPanel] = useState(true)
-  const [captions, setCaptions] = useState<CaptionItem[]>([])
+  const [captions] = useState<CaptionItem[]>([])
   const [listening, setListening] = useState(false)
   const [connectionQuality, setConnectionQuality] = useState<"excellent" | "good" | "poor">("good")
   const [callError, setCallError] = useState<string | null>(null)
@@ -459,13 +459,21 @@ export default function CallRoom({ roomId, userName = "Guest" }: CallRoomProps) 
 
 type VideoGridProps = {
   localStream: MediaStream | null
-  localVideoRef: React.RefObject<HTMLVideoElement>
+  localVideoRef: MutableRefObject<HTMLVideoElement | null>
   remotePeers: RemotePeer[]
   userName: string
 }
 
+type Participant = {
+  peerId: string
+  label: string
+  stream: MediaStream | null
+  muted?: boolean
+  videoRef?: MutableRefObject<HTMLVideoElement | null>
+}
+
 function VideoGrid({ localStream, localVideoRef, remotePeers, userName }: VideoGridProps) {
-  const participants = [
+  const participants: Participant[] = [
     {
       peerId: "local",
       label: `${userName} (You)`,

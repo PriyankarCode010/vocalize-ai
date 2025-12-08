@@ -15,8 +15,9 @@ export async function POST(req: Request) {
     return NextResponse.json({
       prediction: `Received ${landmarks.length} landmarks`,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Error:", err);
-    return NextResponse.json({ prediction: "Error processing landmarks" });
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ prediction: "Error processing landmarks", error: message }, { status: 500 });
   }
 }

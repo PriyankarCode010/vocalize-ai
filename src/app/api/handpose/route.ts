@@ -1,5 +1,10 @@
-import { NextResponse } from "next/server";
 import { spawn } from "child_process";
+import { NextResponse } from "next/server";
+
+type PredictionResult = {
+  prediction: string;
+  [key: string]: unknown;
+};
 
 export async function POST(req: Request) {
   const start = Date.now(); // ⏱️ Start time
@@ -12,7 +17,7 @@ export async function POST(req: Request) {
     }
 
     // Call Python script
-    const result: any = await new Promise((resolve, reject) => {
+    const result = await new Promise<PredictionResult>((resolve, reject) => {
       const py = spawn("python", ["src/python/predict.py"]);
       let data = "";
       let error = "";
@@ -28,11 +33,11 @@ export async function POST(req: Request) {
           reject(error || `Python exited with code ${code}`);
         } else {
           try {
-            const parsed = JSON.parse(data);
+            const parsed = JSON.parse(data) as PredictionResult;
             console.log(`✅ Prediction: ${parsed.prediction} | ⏳ Took: ${duration}ms | Landmarks count: ${landmarks.length}`);
             resolve(parsed);
-          } catch (err) {
-            reject(`Invalid JSON from Python: ${data}`);
+          } catch (parseError) {
+            reject(new Error(`Invalid JSON from Python: ${data}`));
           }
         }
       });
@@ -43,11 +48,12 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json(result);
-  } catch (error: any) {
+  } catch (error: unknown) {
     const duration = Date.now() - start;
     console.error(`❌ API error after ${duration}ms:`, error);
+    const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { prediction: "Error processing landmarks", error: error.toString() },
+      { prediction: "Error processing landmarks", error: message },
       { status: 500 }
     );
   }
