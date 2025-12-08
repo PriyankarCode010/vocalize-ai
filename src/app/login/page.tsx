@@ -10,6 +10,20 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 
+const FALLBACK_APP_ORIGIN = "http://localhost:3000"
+
+function getAppOrigin() {
+  // Prefer an explicit origin so deployments behind proxies don't fall back to localhost.
+  const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "")
+  if (configuredOrigin) {
+    return configuredOrigin
+  }
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin
+  }
+  return FALLBACK_APP_ORIGIN
+}
+
 export default function LoginPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -66,10 +80,11 @@ export default function LoginPage() {
 
     try {
       const returnTo = redirectParam || "/demo"
+      const redirectOrigin = getAppOrigin()
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(returnTo)}`,
+          redirectTo: `${redirectOrigin}/auth/callback?next=${encodeURIComponent(returnTo)}`,
         },
       })
 
