@@ -46,6 +46,7 @@ export default function LoginPage() {
     event.preventDefault()
     setStatus("submitting")
     setMessage(null)
+    console.log("[login] submitting email/password login", { redirectParam })
 
     try {
       const response = await fetch("/api/auth/login", {
@@ -60,10 +61,13 @@ export default function LoginPage() {
       }
 
       setStatus("success")
-      router.push(redirectParam || "/demo")
+      const nextDestination = redirectParam || "/demo"
+      console.log("[login] email/password login success, redirecting", { nextDestination })
+      router.push(nextDestination)
     } catch (error) {
       setStatus("error")
       setMessage(error instanceof Error ? error.message : "Unexpected error.")
+      console.error("[login] email/password login failed", error)
     }
   }
 
@@ -80,6 +84,7 @@ export default function LoginPage() {
     try {
       const returnTo = redirectParam || "/demo"
       const redirectOrigin = getAppOrigin()
+      console.log("[login] launching Google OAuth", { returnTo, redirectOrigin })
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -90,9 +95,11 @@ export default function LoginPage() {
       if (error) {
         throw error
       }
+      console.log("[login] Supabase signInWithOAuth invoked successfully")
     } catch (error) {
       setStatus("error")
       setMessage(error instanceof Error ? error.message : "Unable to start Google sign in.")
+      console.error("[login] Google OAuth launch failed", error)
     }
   }
 
