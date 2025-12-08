@@ -1,0 +1,65 @@
+# Node
+node_modules/
+.next/
+dist/
+out/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Environment
+.env
+*.env
+.env.*
+.env*.local
+
+# OS / IDE
+.DS_Store
+.vscode/
+Thumbs.db
+
+# Misc
+*.zip
+*.tar
+*.gz
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+*.pem
+
+# typescript
+*.tsbuildinfo
+
+app-example
+
+# generated native folders
+/ios
+/android
