@@ -1,38 +1,89 @@
 "use client"
 
 import Link from "next/link"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/ui/theme-toggle"
 import { cn } from "@/lib/utils"
 import { SESSION_COOKIE_NAME } from "@/lib/auth/constants"
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
+
+type Profile = {
+  id: string
+  display_name: string | null
+  avatar_url: string | null
+}
+
+const AVATAR_COLORS = ["#F44336", "#E91E63", "#9C27B0", "#3F51B5", "#03A9F4", "#009688", "#4CAF50", "#FF9800", "#795548"]
+
+function getInitials(name: string, fallback: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return fallback.slice(0, 2).toUpperCase()
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[1][0]).toUpperCase()
+}
+
+function pickColor(seed: string) {
+  let hash = 0
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0
+  }
+  const idx = Math.abs(hash) % AVATAR_COLORS.length
+  return AVATAR_COLORS[idx]
+}
 
 const NAV_LINKS = [
   { label: "Home", href: "/" },
   { label: "Features", href: "/#features" },
   { label: "Demo", href: "/demo" },
-  { label: "Call", href: "/call/new" },
+  { label: "Meeting", href: "/meeting" },
 ]
 
 export function SiteHeader() {
   const pathname = usePathname()
   const router = useRouter()
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const supabase = useMemo(() => {
+    try {
+      return getSupabaseBrowserClient()
+    } catch {
+      return null
+    }
+  }, [])
 
   const refreshAuth = useCallback(() => {
     if (typeof document === "undefined") return
     setIsAuthenticated(document.cookie.includes(`${SESSION_COOKIE_NAME}=`))
   }, [])
 
+  const loadProfile = useCallback(async () => {
+    if (!supabase) return
+    const { data: auth } = await supabase.auth.getUser()
+    if (!auth?.user) {
+      setProfile(null)
+      return
+    }
+    const { data } = await supabase.from("profiles").select("id, display_name, avatar_url").eq("id", auth.user.id).maybeSingle()
+    if (data) {
+      setProfile(data as Profile)
+    }
+  }, [supabase])
+
   useEffect(() => {
     refreshAuth()
-    window.addEventListener("focus", refreshAuth)
-    return () => {
-      window.removeEventListener("focus", refreshAuth)
+    void loadProfile()
+    const onFocus = () => {
+      refreshAuth()
+      void loadProfile()
     }
-  }, [refreshAuth])
+    window.addEventListener("focus", onFocus)
+    return () => {
+      window.removeEventListener("focus", onFocus)
+    }
+  }, [refreshAuth, loadProfile])
 
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" })
@@ -67,9 +118,24 @@ export function SiteHeader() {
           <ThemeToggle />
           {isAuthenticated ? (
             <>
-              <Button asChild variant="outline" size="sm" className="hidden sm:inline-flex">
-                <Link href="/demo">Dashboard</Link>
-              </Button>
+              <div className="flex items-center gap-2 rounded-full border px-2 py-1">
+                <div
+                  className="h-8 w-8 overflow-hidden rounded-full"
+                  style={{
+                    background: profile?.avatar_url ? undefined : pickColor(profile?.id || "you"),
+                  }}
+                >
+                  {profile?.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={profile.avatar_url} alt={profile.display_name || "Profile"} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white">
+                      {getInitials(profile?.display_name || profile?.id || "User", "User")}
+                    </div>
+                  )}
+                </div>
+                <span className="hidden sm:inline text-sm font-medium">{profile?.display_name || profile?.id || "User"}</span>
+              </div>
               <Button size="sm" onClick={handleLogout}>
                 Log out
               </Button>
