@@ -7,7 +7,7 @@ import { subscribeSignals } from "@/lib/webrtc/signaling"
 import { callPeer, createPeerConnection, handleIncomingSignal } from "@/lib/webrtc/peers"
 import { useMeetingStore } from "@/hooks/useMeetingStore"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import type { Meeting, MeetingRequest } from "@/types/meeting"
 import {
@@ -321,11 +321,30 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <VideoTile label="You" stream={localStream} muted />
-          {peers.map((peer) => (
-            <VideoTile key={peer.peerId} label={`Participant ${peer.peerId.slice(0, 6)}`} stream={peer.stream} />
-          ))}
+        <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+          <div className="grid gap-4 md:grid-cols-2">
+            <VideoTile label="You" stream={localStream} muted />
+            {peers.map((peer) => (
+              <VideoTile key={peer.peerId} label={`Participant ${peer.peerId.slice(0, 6)}`} stream={peer.stream} />
+            ))}
+          </div>
+
+          <Card className="h-full">
+            <CardContent className="p-6 flex flex-col gap-4 justify-between h-full">
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">Ready to join?</p>
+                <h2 className="text-xl font-semibold">No one else is here</h2>
+              </div>
+              <div className="flex flex-col gap-3">
+                <Button size="lg" className="rounded-full h-12">
+                  Join now
+                </Button>
+                <Button size="lg" variant="outline" className="rounded-full h-12" onClick={handleCopyLink}>
+                  Present
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
 
