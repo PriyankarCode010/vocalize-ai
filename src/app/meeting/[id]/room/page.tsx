@@ -42,6 +42,7 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
   const [connectionQuality] = useState<"excellent" | "good" | "poor">("good")
   const { localStream, peers, setLocalStream, setControls, controls, removePeer, reset } = useMeetingStore()
   const [hostRequests, setHostRequests] = useState<MeetingRequest[]>([])
+  const [toastRequest, setToastRequest] = useState<MeetingRequest | null>(null)
 
   const ensureAccess = async () => {
     const { data: auth } = await supabase.auth.getUser()
@@ -118,14 +119,9 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
   }
 
   const showJoinToast = (incoming: MeetingRequest) => {
-    const name = incoming.requester_name || incoming.requester_id || "Guest"
-    // Simple fallback toast using window.alert; replace with your toast lib if available
-    try {
-      // If you later add a toast library, replace this with toast(...)
-      alert(`Join request from ${name}`)
-    } catch {
-      /* ignore */
-    }
+    setToastRequest(incoming)
+    // auto hide after 5s
+    setTimeout(() => setToastRequest((current) => (current?.id === incoming.id ? null : current)), 5000)
   }
 
   useEffect(() => {
@@ -367,6 +363,25 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {isHost && toastRequest && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+          <div className="rounded-lg border bg-card shadow-lg px-4 py-3 flex items-center gap-3">
+            <div>
+              <p className="text-sm font-semibold">Join request</p>
+              <p className="text-sm text-muted-foreground truncate">{toastRequest.requester_name || toastRequest.requester_id}</p>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="secondary" onClick={() => handleHostApproval(toastRequest.id, "reject")}>
+                Reject
+              </Button>
+              <Button size="sm" onClick={() => handleHostApproval(toastRequest.id, "approve")}>
+                Allow
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>
