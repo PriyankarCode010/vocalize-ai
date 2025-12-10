@@ -15,6 +15,7 @@ import {
 } from "@heroicons/react/24/outline"
 
 export default function HomePage() {
+  console.log("HomePage")
   return (
     <div className="bg-background">
       {/* Hero Section */}

@@ -61,12 +61,15 @@ export function SiteHeader() {
 
   const loadProfile = useCallback(async () => {
     if (!supabase) return
-    const { data: auth } = await supabase.auth.getUser()
-    if (!auth?.user) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
       setProfile(null)
       return
     }
-    const { data } = await supabase.from("profiles").select("id, display_name, avatar_url").eq("id", auth.user.id).maybeSingle()
+    const { data, error } = await supabase.from("profiles").select("id, display_name, avatar_url").eq("id", user.id).single()
+    console.log("[profile-debug]", { profile: data, error })
     if (data) {
       setProfile(data as Profile)
     }
@@ -92,7 +95,7 @@ export function SiteHeader() {
   }
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+    <header className="sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur supports-backdrop-filter:bg-background/70">
       <div className="container mx-auto flex items-center justify-between px-4 py-4">
         <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight text-lg">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary">S</span>
