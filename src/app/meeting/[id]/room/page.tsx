@@ -312,92 +312,34 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
               <Link2 className="h-4 w-4" />
               Copy link
             </Button>
-            <Badge variant="secondary" className="flex items-center gap-1">
-              {connectionQuality === "excellent" && <SignalHigh className="h-3 w-3" />}
-              {connectionQuality === "good" && <SignalMedium className="h-3 w-3" />}
-              {connectionQuality === "poor" && <SignalLow className="h-3 w-3" />}
-              {connectionQuality === "excellent" ? "Great connection" : connectionQuality === "good" ? "Connecting" : "Unstable"}
-            </Badge>
           </div>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-          <div className="grid gap-4 md:grid-cols-2">
-            <VideoTile label="You" stream={localStream} muted />
-            {peers.map((peer) => (
-              <VideoTile key={peer.peerId} label={`Participant ${peer.peerId.slice(0, 6)}`} stream={peer.stream} />
-            ))}
-          </div>
-
-          <Card className="h-full">
-            <CardContent className="p-6 flex flex-col gap-4 justify-between h-full">
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">Ready to join?</p>
-                <h2 className="text-xl font-semibold">No one else is here</h2>
-              </div>
-              <div className="flex flex-col gap-3">
-                <Button size="lg" className="rounded-full h-12">
-                  Join now
-                </Button>
-                <Button size="lg" variant="outline" className="rounded-full h-12" onClick={handleCopyLink}>
-                  Present
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="grid gap-4 md:grid-cols-2">
+          <VideoTile label="You" stream={localStream} muted />
+          {peers.map((peer) => (
+            <VideoTile key={peer.peerId} label={`Participant ${peer.peerId.slice(0, 6)}`} stream={peer.stream} />
+          ))}
         </div>
-      </div>
 
-      {/* Meet-style control bar */}
-      <div className="fixed bottom-6 left-0 right-0 flex justify-center z-40">
-        <div className="flex items-center gap-3 bg-black/70 text-white px-4 py-2 rounded-full shadow-lg">
-          <Button
-            size="icon"
-            variant={controls.mic ? "secondary" : "destructive"}
-            className="h-11 w-11 rounded-full"
-            onClick={toggleMic}
-          >
-            {controls.mic ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant={controls.mic ? "outline" : "secondary"} onClick={toggleMic} className="min-w-[120px]">
+            {controls.mic ? "Mute" : "Unmute"}
           </Button>
-
-          <Button
-            size="icon"
-            variant={controls.cam ? "secondary" : "destructive"}
-            className="h-11 w-11 rounded-full"
-            onClick={toggleCam}
-          >
-            {controls.cam ? <Camera className="h-5 w-5" /> : <CameraOff className="h-5 w-5" />}
+          <Button variant={controls.cam ? "outline" : "secondary"} onClick={toggleCam} className="min-w-[120px]">
+            {controls.cam ? "Camera off" : "Camera on"}
           </Button>
-
-          <Button size="icon" variant="secondary" className="h-11 w-11 rounded-full" disabled>
-            <Captions className="h-5 w-5" />
+          <Button variant={controls.screen ? "secondary" : "outline"} onClick={handleScreenShare} className="min-w-[120px]">
+            {controls.screen ? "Sharing..." : "Share screen"}
           </Button>
-
-          <Button size="icon" variant="secondary" className="h-11 w-11 rounded-full" disabled>
-            <Hand className="h-5 w-5" />
-          </Button>
-
-          <Button
-            size="icon"
-            variant={controls.screen ? "secondary" : "outline"}
-            className="h-11 w-11 rounded-full"
-            onClick={handleScreenShare}
-          >
-            <MonitorUp className="h-5 w-5" />
-          </Button>
-
-          <Button size="icon" variant="secondary" className="h-11 w-11 rounded-full" disabled>
-            <MoreHorizontal className="h-5 w-5" />
-          </Button>
-
-          <Button size="icon" variant="destructive" className="h-11 w-11 rounded-full" onClick={handleLeave}>
-            <PhoneOff className="h-5 w-5" />
+          <Button variant="destructive" onClick={handleLeave} className="min-w-[120px]">
+            Leave
           </Button>
         </div>
       </div>
 
       {isHost && hostRequests.length > 0 && (
-        <div className="fixed bottom-24 right-4 z-50 flex flex-col gap-3">
+        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-3">
           {hostRequests.map((req) => (
             <div key={req.id} className="rounded-lg border bg-card shadow-lg p-3 w-72">
               <p className="text-sm font-semibold">Join request</p>
