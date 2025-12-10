@@ -139,7 +139,8 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
         void handleIncomingSignal(meetingId, currentUser.id, pcsRef.current, stream, signal)
       })
 
-      if (meeting?.host_id === currentUser.id) {
+      const isHostUser = access.meetingData.host_id === currentUser.id
+      if (isHostUser) {
         unsubHostRequests = supabase
           .channel(`host-requests:${meetingId}`)
           .on(
