@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
+import { Plus } from "lucide-react"
 
 const extractMeetingId = (value: string) => {
   const trimmed = value.trim()
@@ -36,6 +36,10 @@ export default function MeetingLandingPage() {
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [joining, setJoining] = useState(false)
+  const isJoinEnabled = (() => {
+    const extracted = extractMeetingId(code)
+    return !!extracted && isValidMeetingId(extracted)
+  })()
 
   // Temporary debug: log session to console
   useEffect(() => {
@@ -84,49 +88,35 @@ export default function MeetingLandingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-muted/20">
-      <div className="container mx-auto px-4 py-16 max-w-4xl">
-        <div className="text-center mb-10 space-y-3">
-          <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Meet</p>
-          <h1 className="text-3xl font-semibold text-foreground">Create or join a meeting</h1>
-          <p className="text-muted-foreground">Share a link to invite people or join with a meeting ID.</p>
-        </div>
+    <div className="min-h-screen bg-background flex items-center justify-center px-4">
+      <form onSubmit={handleJoin} className="flex flex-col gap-4 w-full max-w-3xl">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            onClick={handleCreate}
+            disabled={creating}
+            className="bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 h-11"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            {creating ? "Creating..." : "New meeting"}
+          </Button>
 
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card className="border-dashed">
-            <CardHeader>
-              <CardTitle>Create a meeting</CardTitle>
-              <CardDescription>Get a unique link you can share with others.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" onClick={handleCreate} disabled={creating}>
-                {creating ? "Creating..." : "Create meeting"}
-              </Button>
-            </CardContent>
-          </Card>
+          <div className="flex-1 flex items-center gap-2 border rounded-full px-3 h-11">
+            <Input
+              className="border-0 focus-visible:ring-0 px-2"
+              placeholder="Enter a code or link"
+              aria-label="Meeting code or link"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+            />
+          </div>
 
-          <Card className="border-dashed">
-            <CardHeader>
-              <CardTitle>Join with ID</CardTitle>
-              <CardDescription>Paste a meeting ID or link.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form className="space-y-3" onSubmit={handleJoin}>
-                <Input
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  placeholder="UUID meeting ID"
-                  aria-label="Meeting ID"
-                />
-                {error && <p className="text-sm text-destructive">{error}</p>}
-                <Button type="submit" className="w-full" variant="outline" disabled={joining}>
-                  {joining ? "Joining..." : "Join"}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
+          <Button type="submit" disabled={!isJoinEnabled || joining} variant="secondary" className="h-11 rounded-full px-5">
+            {joining ? "Joining..." : "Join"}
+          </Button>
         </div>
-      </div>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+      </form>
     </div>
   )
 }
