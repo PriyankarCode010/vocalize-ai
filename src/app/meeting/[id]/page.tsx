@@ -6,11 +6,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Loader2, Mic, MicOff, Camera, CameraOff, MoreHorizontal, PhoneOff } from "lucide-react"
-
-type Meeting = {
-  id: string
-  title: string | null
-}
+import type { Meeting, MeetingRequest } from "@/types/meeting"
 
 export default function MeetingLobbyPage({ params }: { params: Promise<{ id: string }> }) {
   const meetingParams = React.use(params)
@@ -20,23 +16,31 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [meeting, setMeeting] = useState<Meeting | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [micOn, setMicOn] = useState(false)
   const [camOn, setCamOn] = useState(false)
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const [hostRequests, setHostRequests] = useState<MeetingRequest[]>([])
+  const [toastRequest, setToastRequest] = useState<MeetingRequest | null>(null)
 
   useEffect(() => {
     const init = async () => {
       setLoading(true)
       setError(null)
+
+      const { data: auth } = await supabase.auth.getUser()
+      setUserId(auth?.user?.id ?? null)
+
       const { data, error: meetingError } = await supabase.from("meetings").select("*").eq("id", meetingId).single()
       if (meetingError || !data) {
         setError("Meeting not found.")
         setLoading(false)
         return
       }
-      setMeeting({ id: data.id, title: data.title })
+
+      setMeeting(data as Meeting)
       setLoading(false)
     }
     void init()
@@ -51,6 +55,36 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
     }
     attach()
   }, [localStream])
+
+  useEffect(() => {
+    if (!meeting || !userId || meeting.host_id !== userId) return
+
+    const channel = supabase
+      .channel(`host-requests:${meetingId}-lobby`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "meeting_requests", filter: `meeting_id=eq.${meetingId}` },
+        (payload: { new: MeetingRequest }) => {
+          const incoming = payload.new as MeetingRequest
+          if (incoming.status === "pending") {
+            setHostRequests((prev) => {
+              if (prev.find((p) => p.id === incoming.id)) return prev
+              return [...prev, incoming]
+            })
+            showJoinToast(incoming)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      try {
+        channel.unsubscribe()
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [meeting, meetingId, supabase, userId])
 
   const requestMedia = async () => {
     try {
@@ -77,6 +111,22 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
     setCamOn(enabled)
   }
 
+  const handleHostApproval = async (requestId: string, action: "approve" | "reject") => {
+    const endpoint = action === "approve" ? "/api/meeting/approve" : "/api/meeting/reject"
+    await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId, meetingId }),
+    })
+    setHostRequests((prev) => prev.filter((r) => r.id !== requestId))
+    setToastRequest((current) => (current?.id === requestId ? null : current))
+  }
+
+  const showJoinToast = (incoming: MeetingRequest) => {
+    setToastRequest(incoming)
+    setTimeout(() => setToastRequest((current) => (current?.id === incoming.id ? null : current)), 5000)
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -97,6 +147,8 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
       </div>
     )
   }
+
+  const isHost = meeting && userId && meeting.host_id === userId
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-6 py-8">
@@ -167,8 +219,49 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
           </CardContent>
         </Card>
       </div>
+
+      {isHost && hostRequests.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-3">
+          {hostRequests.map((req) => (
+            <div key={req.id} className="rounded-lg border bg-card shadow-lg p-3 w-72">
+              <p className="text-sm font-semibold">Join request</p>
+              <p className="text-sm text-muted-foreground truncate">{req.requester_name || req.requester_id}</p>
+              <div className="mt-3 flex gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handleHostApproval(req.id, "reject")}
+                  className="flex-1"
+                >
+                  Reject
+                </Button>
+                <Button size="sm" onClick={() => handleHostApproval(req.id, "approve")} className="flex-1">
+                  Allow
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isHost && toastRequest && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+          <div className="rounded-lg border bg-card shadow-lg px-4 py-3 flex items-center gap-3">
+            <div>
+              <p className="text-sm font-semibold">Join request</p>
+              <p className="text-sm text-muted-foreground truncate">{toastRequest.requester_name || toastRequest.requester_id}</p>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="secondary" onClick={() => handleHostApproval(toastRequest.id, "reject")}>
+                Reject
+              </Button>
+              <Button size="sm" onClick={() => handleHostApproval(toastRequest.id, "approve")}>
+                Allow
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
-
-
