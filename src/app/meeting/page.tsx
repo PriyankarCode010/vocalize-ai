@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 
 const extractMeetingId = (value: string) => {
   const trimmed = value.trim()
@@ -24,10 +25,25 @@ const isValidMeetingId = (value: string) =>
 
 export default function MeetingLandingPage() {
   const router = useRouter()
+  const supabase = useMemo(() => {
+    try {
+      return getSupabaseBrowserClient()
+    } catch {
+      return null
+    }
+  }, [])
   const [code, setCode] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [joining, setJoining] = useState(false)
+
+  // Temporary debug: log session to console
+  useEffect(() => {
+    if (!supabase) return
+    supabase.auth.getSession().then((result: { data?: { session?: unknown } }) => {
+      console.log("[session-debug] auth session", result?.data?.session)
+    })
+  }, [supabase])
 
   const handleCreate = async () => {
     setCreating(true)

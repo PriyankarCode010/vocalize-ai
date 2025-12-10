@@ -23,6 +23,7 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
   const [error, setError] = useState<string | null>(null)
   const [joining, setJoining] = useState(false)
   const { localStream, peers, setLocalStream, setControls, controls, removePeer, reset } = useMeetingStore()
+  const [hostRequests, setHostRequests] = useState<MeetingRequest[]>([])
 
   const ensureAccess = async () => {
     const { data: auth } = await supabase.auth.getUser()
@@ -95,6 +96,7 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
   useEffect(() => {
     let unsubSignals: (() => void) | null = null
     let unsubRequests: (() => void) | null = null
+    let unsubHostRequests: (() => void) | null = null
     const init = async () => {
       setLoading(true)
       const allowed = await ensureAccess()
@@ -109,6 +111,25 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
         if (!stream) return
         void handleIncomingSignal(meetingId, currentUser.id, pcsRef.current, stream, signal)
       })
+
+      if (meeting?.host_id === currentUser.id) {
+        unsubHostRequests = supabase
+          .channel(`host-requests:${meetingId}`)
+          .on(
+            "postgres_changes",
+            { event: "INSERT", schema: "public", table: "meeting_requests", filter: `meeting_id=eq.${meetingId}` },
+            (payload: { new: MeetingRequest }) => {
+              const incoming = payload.new as MeetingRequest
+              if (incoming.status === "pending") {
+                setHostRequests((prev) => {
+                  if (prev.find((p) => p.id === incoming.id)) return prev
+                  return [...prev, incoming]
+                })
+              }
+            }
+          )
+          .subscribe()
+      }
 
       unsubRequests = supabase
         .channel(`room-requests:${meetingId}`)
@@ -133,6 +154,7 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
     return () => {
       unsubSignals?.()
       unsubRequests?.()
+      unsubHostRequests?.()
       pcsRef.current.forEach((pc) => pc.close())
       pcsRef.current.clear()
       useMeetingStore.getState().reset()
@@ -184,6 +206,16 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
     router.push(`/meeting/${meetingId}`)
   }
 
+  const handleHostApproval = async (requestId: string, action: "approve" | "reject") => {
+    const endpoint = action === "approve" ? "/api/meeting/approve" : "/api/meeting/reject"
+    await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId, meetingId }),
+    })
+    setHostRequests((prev) => prev.filter((r) => r.id !== requestId))
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -201,6 +233,8 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
       </div>
     )
   }
+
+  const isHost = meeting && userId && meeting.host_id === userId
 
   return (
     <div className="min-h-screen bg-background">
@@ -233,6 +267,25 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
           ))}
         </div>
       </div>
+
+      {isHost && hostRequests.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-3">
+          {hostRequests.map((req) => (
+            <div key={req.id} className="rounded-lg border bg-card shadow-lg p-3 w-72">
+              <p className="text-sm font-semibold">Join request</p>
+              <p className="text-sm text-muted-foreground truncate">{req.requester_name || req.requester_id}</p>
+              <div className="mt-3 flex gap-2">
+                <Button size="sm" variant="secondary" onClick={() => handleHostApproval(req.id, "reject")} className="flex-1">
+                  Reject
+                </Button>
+                <Button size="sm" onClick={() => handleHostApproval(req.id, "approve")} className="flex-1">
+                  Allow
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

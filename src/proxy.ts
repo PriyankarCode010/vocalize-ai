@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth/constants"
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value
   if (!sessionCookie) {
     const loginUrl = new URL("/login", request.url)
@@ -15,5 +15,7 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/meeting/:path*", "/demo","/meeting/"],
+  matcher: ["/meeting/:path*", "/demo"],
 }
+
+
