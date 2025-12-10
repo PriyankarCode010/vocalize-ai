@@ -29,11 +29,13 @@ export async function createPeerConnection(
   pc.ontrack = (event) => {
     const [stream] = event.streams
     if (stream) {
+      console.log("[webrtc] ontrack received", { from: remoteId, to: selfId, trackKinds: event.streams?.[0]?.getTracks().map((t) => t.kind) })
       useMeetingStore.getState().addPeer({ peerId: remoteId, stream })
     }
   }
 
   pc.onconnectionstatechange = () => {
+    console.log("[webrtc] connection state", { selfId, remoteId, state: pc.connectionState })
     if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
       useMeetingStore.getState().removePeer(remoteId)
     }
@@ -52,6 +54,8 @@ export async function handleIncomingSignal(
   if (signal.from_peer === selfId) return
   if (signal.to_peer && signal.to_peer !== selfId) return
 
+  console.log("[webrtc] incoming signal", { meetingId, selfId, signal })
+
   let pc = pcs.get(signal.from_peer)
   if (!pc) {
     pc = await createPeerConnection(meetingId, selfId, signal.from_peer, localStream)
@@ -60,6 +64,7 @@ export async function handleIncomingSignal(
 
   if (signal.type === "offer") {
     await pc.setRemoteDescription(new RTCSessionDescription(signal.payload))
+    console.log("[webrtc] set remote offer, creating answer", { from: signal.from_peer, to: selfId })
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
     await sendSignal({
@@ -69,13 +74,16 @@ export async function handleIncomingSignal(
       type: "answer",
       payload: answer,
     })
+    console.log("[webrtc] sent answer", { from: selfId, to: signal.from_peer })
   } else if (signal.type === "answer") {
     if (!pc.currentRemoteDescription) {
       await pc.setRemoteDescription(new RTCSessionDescription(signal.payload))
+      console.log("[webrtc] set remote answer", { from: signal.from_peer, to: selfId })
     }
   } else if (signal.type === "ice" && signal.payload) {
     try {
       await pc.addIceCandidate(new RTCIceCandidate(signal.payload))
+      console.log("[webrtc] added ice candidate", { from: signal.from_peer, to: selfId })
     } catch (error) {
       console.error("Error adding ICE candidate", error)
     }

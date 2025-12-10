@@ -25,6 +25,7 @@ export function subscribeSignals(meetingId: string, onSignal: (signal: MeetingSi
         filter: `meeting_id=eq.${meetingId}`,
       },
       (payload: { new: MeetingSignal }) => {
+        console.log("[signals] received realtime insert", payload.new)
         onSignal(payload.new as MeetingSignal)
       }
     )

@@ -15,7 +15,6 @@ import {
 } from "@heroicons/react/24/outline"
 
 export default function HomePage() {
-  console.log("HomePage")
   return (
     <div className="bg-background">
       {/* Hero Section */}
@@ -159,7 +158,7 @@ export default function HomePage() {
       <section className="py-20 px-4">
         <div className="container mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">How SignSpeak Works</h2>
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">How vocalize-ai Works</h2>
             <p className="text-xl text-muted-foreground">Simple, intuitive, and powered by advanced AI technology</p>
           </div>
 
@@ -257,7 +256,7 @@ export default function HomePage() {
                   </label>
                   <Textarea
                     id="message"
-                    placeholder="How would you like to use SignSpeak? Any specific requirements?"
+                    placeholder="How would you like to use vocalize-ai? Any specific requirements?"
                     rows={4}
                   />
                 </div>

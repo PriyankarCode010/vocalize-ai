@@ -69,9 +69,18 @@ export function SiteHeader() {
       return
     }
     const { data, error } = await supabase.from("profiles").select("id, display_name, avatar_url").eq("id", user.id).single()
+    const username = data?.display_name || user.user_metadata?.full_name || user.email || "Unknown user"
+    console.log("username", username)
+    console.log("user", user)
     console.log("[profile-debug]", { profile: data, error })
     if (data) {
       setProfile(data as Profile)
+    } else {
+      setProfile({
+        id: user.id,
+        display_name: username,
+        avatar_url: null,
+      })
     }
   }, [supabase])
 
@@ -99,7 +108,7 @@ export function SiteHeader() {
       <div className="container mx-auto flex items-center justify-between px-4 py-4">
         <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight text-lg">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary">S</span>
-          SignSpeak
+          vocalize-ai
         </Link>
 
         <nav className="hidden items-center gap-6 text-sm font-medium md:flex">

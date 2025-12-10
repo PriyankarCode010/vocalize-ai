@@ -310,7 +310,7 @@ export default function HandSignRecognition() {
               <Hand className="h-8 w-8 text-primary" />
             </div>
             <h1 className="text-4xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              SignSpeak
+              vocalize-ai
             </h1>
           </div>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">

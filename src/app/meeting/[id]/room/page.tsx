@@ -32,17 +32,19 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
     if (!user) {
       setError("You must be signed in.")
       setLoading(false)
-      return false
+      return { allowed: false }
     }
     const { data: meetingData, error: meetingError } = await supabase.from("meetings").select("*").eq("id", meetingId).single()
     if (meetingError || !meetingData) {
       setError("Meeting not found.")
       setLoading(false)
-      return false
+      return { allowed: false }
     }
-    setMeeting(meetingData as Meeting)
 
-    if (meetingData.host_id === user.id) return true
+    if (meetingData.host_id === user.id) {
+      return { allowed: true, meetingData: meetingData as Meeting, user }
+    }
+
     const { data: req } = await supabase
       .from("meeting_requests")
       .select("*")
@@ -55,14 +57,14 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
     if (!req) {
       setError("You are not approved for this meeting.")
       setLoading(false)
-      return false
+      return { allowed: false }
     }
-    return true
+    return { allowed: true, meetingData: meetingData as Meeting, user }
   }
 
-  const loadParticipants = async (self: string) => {
+  const loadParticipants = async (self: string, hostId: string | null) => {
     const ids = new Set<string>()
-    if (meeting?.host_id) ids.add(meeting.host_id)
+    if (hostId) ids.add(hostId)
     ids.add(self)
     const { data: approved } = await supabase
       .from("meeting_requests")
@@ -84,12 +86,16 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
   }
 
   const connectToPeers = async (self: string, others: string[], stream: MediaStream) => {
-    for (const peerId of others) {
+    const sorted = [...others].sort()
+    for (const peerId of sorted) {
       if (peerId === self) continue
       if (pcsRef.current.has(peerId)) continue
       const pc = await createPeerConnection(meetingId, self, peerId, stream)
       pcsRef.current.set(peerId, pc)
-      await callPeer(meetingId, self, peerId, pc)
+      // Simple glare avoidance: only the lexicographically lower ID initiates the offer
+      if (self < peerId) {
+        await callPeer(meetingId, self, peerId, pc)
+      }
     }
   }
 
@@ -99,16 +105,19 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
     let unsubHostRequests: (() => void) | null = null
     const init = async () => {
       setLoading(true)
-      const allowed = await ensureAccess()
-      if (!allowed) return
-      const currentUser = (await supabase.auth.getUser()).data?.user
-      if (!currentUser) return
+      const access = await ensureAccess()
+      if (!access.allowed || !access.meetingData || !access.user) return
+      setMeeting(access.meetingData)
+      const currentUser = access.user
+      console.log("[room] self user.id", currentUser.id, "meeting", meetingId)
       const stream = await startMedia()
-      const others = await loadParticipants(currentUser.id)
+      const others = await loadParticipants(currentUser.id, access.meetingData.host_id || null)
+      console.log("[room] participants (user ids)", others)
       await connectToPeers(currentUser.id, others, stream)
 
       unsubSignals = subscribeSignals(meetingId, (signal) => {
         if (!stream) return
+        console.log("[signal] incoming", signal)
         void handleIncomingSignal(meetingId, currentUser.id, pcsRef.current, stream, signal)
       })
 

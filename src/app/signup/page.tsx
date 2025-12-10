@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 
@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 
 export default function SignupPage() {
   const router = useRouter()
@@ -16,6 +17,14 @@ export default function SignupPage() {
   const [password, setPassword] = useState("")
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle")
   const [message, setMessage] = useState<string | null>(null)
+  const supabase = useMemo(() => {
+    try {
+      return getSupabaseBrowserClient()
+    } catch (error) {
+      console.error("[signup] supabase init failed", error)
+      return null
+    }
+  }, [])
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -49,6 +58,29 @@ export default function SignupPage() {
     }
   }
 
+  const handleGoogleSignup = async () => {
+    if (!supabase) {
+      setStatus("error")
+      setMessage("Supabase is not configured. Check environment variables.")
+      return
+    }
+    setStatus("submitting")
+    setMessage("Redirecting to Google...")
+    try {
+      const callbackUrl = new URL("/api/auth/callback", window.location.origin)
+      callbackUrl.searchParams.set("next", "/meeting")
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: callbackUrl.toString() },
+      })
+      if (error) throw error
+    } catch (error) {
+      setStatus("error")
+      setMessage(error instanceof Error ? error.message : "Unable to start Google sign up.")
+      console.error("[signup] Google OAuth launch failed", error)
+    }
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-muted/20 px-4 py-12">
       <Card className="w-full max-w-md p-6 space-y-6">
@@ -56,7 +88,7 @@ export default function SignupPage() {
           <Badge variant="secondary" className="mx-auto w-fit">
             Create Account
           </Badge>
-          <h1 className="text-2xl font-semibold">Join SignSpeak</h1>
+          <h1 className="text-2xl font-semibold">Join vocalize-ai</h1>
           <p className="text-sm text-muted-foreground">We&apos;ll store your profile locally so you can explore the product.</p>
         </div>
 
@@ -111,6 +143,16 @@ export default function SignupPage() {
             {status === "submitting" ? "Creating account..." : "Create account"}
           </Button>
         </form>
+
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={handleGoogleSignup}
+          disabled={status === "submitting" || !supabase}
+        >
+          Continue with Google
+        </Button>
 
         <p className="text-sm text-muted-foreground text-center">
           Already have an account?{" "}

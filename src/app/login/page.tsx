@@ -109,7 +109,7 @@ export default function LoginPage() {
           <Badge variant="secondary" className="mx-auto w-fit">
             Welcome Back
           </Badge>
-          <h1 className="text-2xl font-semibold">Log in to SignSpeak</h1>
+          <h1 className="text-2xl font-semibold">Log in to vocalize-ai</h1>
           <p className="text-sm text-muted-foreground">
             Use email credentials below or continue with Google via Supabase Auth.
           </p>

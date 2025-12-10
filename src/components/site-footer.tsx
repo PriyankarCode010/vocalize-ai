@@ -6,7 +6,7 @@ export function SiteFooter() {
       <div className="container mx-auto px-4 py-8">
         <div className="grid gap-8 md:grid-cols-3">
           <div className="space-y-2">
-            <p className="text-lg font-semibold">SignSpeak</p>
+            <p className="text-lg font-semibold">vocalize-ai</p>
             <p className="text-sm text-muted-foreground">
               AI-first communication assistant bridging the gap between spoken language and sign language.
             </p>
@@ -54,7 +54,7 @@ export function SiteFooter() {
         </div>
 
         <div className="mt-8 border-t border-border pt-4 text-center text-xs text-muted-foreground">
-          &copy; {new Date().getFullYear()} SignSpeak. All rights reserved.
+          &copy; {new Date().getFullYear()} vocalize-ai. All rights reserved.
         </div>
       </div>
     </footer>
