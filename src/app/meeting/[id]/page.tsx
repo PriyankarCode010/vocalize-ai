@@ -11,6 +11,7 @@ import type { Meeting, MeetingRequest } from "@/types/meeting"
 export default function MeetingLobbyPage({ params }: { params: Promise<{ id: string }> }) {
   const meetingParams = React.use(params)
   const meetingId = meetingParams.id
+  console.log("[lobby] component mount, meetingId", meetingId)
   const router = useRouter()
   const supabase = useMemo(() => getSupabaseBrowserClient(), [])
 
@@ -27,19 +28,23 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
 
   useEffect(() => {
     const init = async () => {
+      console.log("[lobby] init start", { meetingId })
       setLoading(true)
       setError(null)
 
       const { data: auth } = await supabase.auth.getUser()
+      console.log("[lobby] auth user", auth?.user)
       setUserId(auth?.user?.id ?? null)
 
       const { data, error: meetingError } = await supabase.from("meetings").select("*").eq("id", meetingId).single()
       if (meetingError || !data) {
+        console.error("[lobby] meeting fetch failed", { meetingError, meetingId })
         setError("Meeting not found.")
         setLoading(false)
         return
       }
 
+      console.log("[lobby] meeting loaded", data)
       setMeeting(data as Meeting)
       setLoading(false)
     }
@@ -49,6 +54,7 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   useEffect(() => {
     const attach = () => {
       if (videoRef.current && localStream) {
+        console.log("[lobby] attaching localStream to video element", localStream)
         videoRef.current.srcObject = localStream
         videoRef.current.play().catch(() => {})
       }
@@ -57,7 +63,22 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   }, [localStream])
 
   useEffect(() => {
-    if (!meeting || !userId || meeting.host_id !== userId) return
+    if (!meeting || !userId || meeting.host_id !== userId) {
+      if (meeting && userId) {
+        console.log("[lobby] not subscribing to host requests (not host user)", {
+          meetingHostId: meeting.host_id,
+          userId,
+        })
+      } else {
+        console.log("[lobby] not subscribing to host requests (missing meeting or userId)", {
+          hasMeeting: !!meeting,
+          userId,
+        })
+      }
+      return
+    }
+
+    console.log("[lobby] subscribing to host requests channel (lobby)", { meetingId, userId })
 
     const channel = supabase
       .channel(`host-requests:${meetingId}-lobby`)
@@ -66,6 +87,7 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
         { event: "INSERT", schema: "public", table: "meeting_requests", filter: `meeting_id=eq.${meetingId}` },
         (payload: { new: MeetingRequest }) => {
           const incoming = payload.new as MeetingRequest
+          console.log("[lobby] incoming meeting_request INSERT (lobby)", incoming)
           if (incoming.status === "pending") {
             setHostRequests((prev) => {
               if (prev.find((p) => p.id === incoming.id)) return prev
@@ -79,6 +101,7 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
 
     return () => {
       try {
+        console.log("[lobby] unsubscribing host requests channel (lobby)")
         channel.unsubscribe()
       } catch {
         /* ignore */
@@ -88,11 +111,14 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
 
   const requestMedia = async () => {
     try {
+      console.log("[lobby] requestMedia called")
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      console.log("[lobby] media stream acquired", stream)
       setLocalStream(stream)
       setMicOn(true)
       setCamOn(true)
-    } catch {
+    } catch (err) {
+      console.error("[lobby] requestMedia failed, permission likely denied", err)
       setError("Please allow microphone and camera.")
     }
   }
@@ -100,6 +126,7 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   const toggleMic = () => {
     if (!localStream) return
     const enabled = !micOn
+    console.log("[lobby] toggleMic", { previous: micOn, next: enabled })
     localStream.getAudioTracks().forEach((t) => (t.enabled = enabled))
     setMicOn(enabled)
   }
@@ -107,27 +134,37 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   const toggleCam = () => {
     if (!localStream) return
     const enabled = !camOn
+    console.log("[lobby] toggleCam", { previous: camOn, next: enabled })
     localStream.getVideoTracks().forEach((t) => (t.enabled = enabled))
     setCamOn(enabled)
   }
 
   const handleHostApproval = async (requestId: string, action: "approve" | "reject") => {
+    console.log("[lobby] handleHostApproval called", { requestId, action, meetingId })
     const endpoint = action === "approve" ? "/api/meeting/approve" : "/api/meeting/reject"
-    await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId, meetingId }),
-    })
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId, meetingId }),
+      })
+      const body = await res.json().catch(() => null)
+      console.log("[lobby] handleHostApproval response", { status: res.status, ok: res.ok, body })
+    } catch (err) {
+      console.error("[lobby] handleHostApproval request failed", err)
+    }
     setHostRequests((prev) => prev.filter((r) => r.id !== requestId))
     setToastRequest((current) => (current?.id === requestId ? null : current))
   }
 
   const showJoinToast = (incoming: MeetingRequest) => {
+    console.log("[lobby] showJoinToast", incoming)
     setToastRequest(incoming)
     setTimeout(() => setToastRequest((current) => (current?.id === incoming.id ? null : current)), 5000)
   }
 
   if (loading) {
+    console.log("[lobby] render loading state")
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3 text-muted-foreground">
@@ -139,6 +176,7 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   }
 
   if (error) {
+    console.log("[lobby] render error state", error)
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <Card className="max-w-md w-full p-4">
@@ -149,6 +187,7 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   }
 
   const isHost = meeting && userId && meeting.host_id === userId
+  console.log("[lobby] render main UI", { isHost, meeting, userId, hasLocalStream: !!localStream })
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-6 py-8">

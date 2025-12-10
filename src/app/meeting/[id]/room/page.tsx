@@ -97,22 +97,36 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
   }
 
   const startMedia = async () => {
-    if (localStream) return localStream
+    if (localStream) {
+      console.log("[room/webrtc] startMedia reuse existing localStream", {
+        hasAudio: localStream.getAudioTracks().length,
+        hasVideo: localStream.getVideoTracks().length,
+      })
+      return localStream
+    }
+    console.log("[room/webrtc] startMedia requesting user media")
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    console.log("[room/webrtc] got user media", {
+      audioTracks: stream.getAudioTracks().length,
+      videoTracks: stream.getVideoTracks().length,
+    })
     setLocalStream(stream)
     setControls({ mic: true, cam: true })
     return stream
   }
 
   const connectToPeers = async (self: string, others: string[], stream: MediaStream) => {
+    console.log("[room/webrtc] connectToPeers called", { self, others, trackKinds: stream.getTracks().map((t) => t.kind) })
     const sorted = [...others].sort()
     for (const peerId of sorted) {
       if (peerId === self) continue
       if (pcsRef.current.has(peerId)) continue
+      console.log("[room/webrtc] creating pc for peer", { self, peerId })
       const pc = await createPeerConnection(meetingId, self, peerId, stream)
       pcsRef.current.set(peerId, pc)
       // Simple glare avoidance: only the lexicographically lower ID initiates the offer
       if (self < peerId) {
+        console.log("[room/webrtc] self is lower id, initiating callPeer", { self, peerId })
         await callPeer(meetingId, self, peerId, pc)
       }
     }
@@ -142,7 +156,7 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
 
       unsubSignals = subscribeSignals(meetingId, (signal) => {
         if (!stream) return
-        console.log("[signal] incoming", signal)
+        console.log("[room/webrtc] subscribeSignals callback", signal)
         void handleIncomingSignal(meetingId, currentUser.id, pcsRef.current, stream, signal)
       })
 
@@ -197,6 +211,7 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
       }
       try {
         pcsRef.current.forEach((pc) => pc.close())
+        console.log("[room/webrtc] closed all peer connections on cleanup")
         pcsRef.current.clear()
       } catch {
         /* ignore */

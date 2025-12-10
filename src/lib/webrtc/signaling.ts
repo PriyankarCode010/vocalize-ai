@@ -14,6 +14,7 @@ export type SignalPayload = {
 
 export function subscribeSignals(meetingId: string, onSignal: (signal: MeetingSignal) => void): () => void {
   const supabase = getSupabaseBrowserClient()
+  console.log("[signals] subscribeSignals called", { meetingId })
   const channel: RealtimeChannel = supabase
     .channel(`signals:${meetingId}`)
     .on(
@@ -25,26 +26,44 @@ export function subscribeSignals(meetingId: string, onSignal: (signal: MeetingSi
         filter: `meeting_id=eq.${meetingId}`,
       },
       (payload: { new: MeetingSignal }) => {
-        console.log("[signals] received realtime insert", payload.new)
+        console.log("[signals] received realtime insert", {
+          id: payload.new.id,
+          meeting_id: payload.new.meeting_id,
+          from_peer: payload.new.from_peer,
+          to_peer: payload.new.to_peer,
+          type: payload.new.type,
+        })
         onSignal(payload.new as MeetingSignal)
       }
     )
     .subscribe()
 
   return () => {
+    console.log("[signals] unsubscribeSignals called", { meetingId })
     channel.unsubscribe()
   }
 }
 
 export async function sendSignal(payload: SignalPayload) {
   const supabase = getSupabaseBrowserClient()
-  await supabase.from("meeting_signals").insert({
+  console.log("[signals] sendSignal called", {
+    meeting_id: payload.meeting_id,
+    from_peer: payload.from_peer,
+    to_peer: payload.to_peer ?? null,
+    type: payload.type,
+  })
+  const { error } = await supabase.from("meeting_signals").insert({
     meeting_id: payload.meeting_id,
     from_peer: payload.from_peer,
     to_peer: payload.to_peer ?? null,
     type: payload.type,
     payload: payload.payload,
   })
+  if (error) {
+    console.error("[signals] sendSignal insert error", error)
+  } else {
+    console.log("[signals] sendSignal insert success")
+  }
 }
 
 
