@@ -117,6 +117,17 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  const showJoinToast = (incoming: MeetingRequest) => {
+    const name = incoming.requester_name || incoming.requester_id || "Guest"
+    // Simple fallback toast using window.alert; replace with your toast lib if available
+    try {
+      // If you later add a toast library, replace this with toast(...)
+      alert(`Join request from ${name}`)
+    } catch {
+      /* ignore */
+    }
+  }
+
   useEffect(() => {
     let unsubSignals: (() => void) | null = null
     let unsubRequests: (() => void) | null = null
@@ -153,6 +164,7 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
                   if (prev.find((p) => p.id === incoming.id)) return prev
                   return [...prev, incoming]
                 })
+                showJoinToast(incoming)
               }
             }
           )
