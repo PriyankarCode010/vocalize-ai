@@ -6,6 +6,8 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
+import { CheckCircle2, Clock, XCircle, Loader2, Users, ArrowRight } from "lucide-react"
 import type { Meeting, MeetingRequest } from "@/types/meeting"
 
 export default function MeetingLobbyPage({ params }: { params: Promise<{ id: string }> }) {

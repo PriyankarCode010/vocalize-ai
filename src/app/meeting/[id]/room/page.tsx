@@ -8,7 +8,24 @@ import { callPeer, createPeerConnection, handleIncomingSignal } from "@/lib/webr
 import { useMeetingStore } from "@/hooks/useMeetingStore"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import type { Meeting, MeetingRequest } from "@/types/meeting"
+import {
+  Camera,
+  CameraOff,
+  Captions,
+  Hand,
+  Mic,
+  MicOff,
+  MonitorUp,
+  MoreHorizontal,
+  PhoneOff,
+  SignalHigh,
+  SignalLow,
+  SignalMedium,
+  Link2,
+  Loader2,
+} from "lucide-react"
 
 export default function MeetingRoomPage({ params }: { params: Promise<{ id: string }> }) {
   const meetingParams = React.use(params)
@@ -22,6 +39,7 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [joining, setJoining] = useState(false)
+  const [connectionQuality] = useState<"excellent" | "good" | "poor">("good")
   const { localStream, peers, setLocalStream, setControls, controls, removePeer, reset } = useMeetingStore()
   const [hostRequests, setHostRequests] = useState<MeetingRequest[]>([])
 
@@ -243,6 +261,11 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
     router.push(`/meeting/${meetingId}`)
   }
 
+  const handleCopyLink = () => {
+    if (typeof window === "undefined") return
+    navigator.clipboard?.writeText(window.location.href).catch((err) => console.error("copy link failed", err))
+  }
+
   const handleHostApproval = async (requestId: string, action: "approve" | "reject") => {
     const endpoint = action === "approve" ? "/api/meeting/approve" : "/api/meeting/reject"
     await fetch(endpoint, {
@@ -255,15 +278,18 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p>Connecting...</p>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-12 w-12 text-primary animate-spin" />
+          <p className="text-muted-foreground font-medium">Connecting...</p>
+        </div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <Card className="max-w-md p-4">
           <p className="text-destructive">{error}</p>
         </Card>
@@ -282,18 +308,16 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
             <h1 className="text-2xl font-semibold">{meeting?.title || meeting?.id}</h1>
           </div>
           <div className="flex gap-2">
-            <Button variant={controls.mic ? "outline" : "secondary"} onClick={toggleMic}>
-              {controls.mic ? "Mute" : "Unmute"}
+            <Button size="sm" variant="outline" className="flex items-center gap-2" onClick={handleCopyLink}>
+              <Link2 className="h-4 w-4" />
+              Copy link
             </Button>
-            <Button variant={controls.cam ? "outline" : "secondary"} onClick={toggleCam}>
-              {controls.cam ? "Camera off" : "Camera on"}
-            </Button>
-            <Button variant={controls.screen ? "secondary" : "outline"} onClick={handleScreenShare}>
-              {controls.screen ? "Sharing..." : "Share screen"}
-            </Button>
-            <Button variant="destructive" onClick={handleLeave}>
-              Leave
-            </Button>
+            <Badge variant="secondary" className="flex items-center gap-1">
+              {connectionQuality === "excellent" && <SignalHigh className="h-3 w-3" />}
+              {connectionQuality === "good" && <SignalMedium className="h-3 w-3" />}
+              {connectionQuality === "poor" && <SignalLow className="h-3 w-3" />}
+              {connectionQuality === "excellent" ? "Great connection" : connectionQuality === "good" ? "Connecting" : "Unstable"}
+            </Badge>
           </div>
         </div>
 
@@ -305,8 +329,56 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
+      {/* Meet-style control bar */}
+      <div className="fixed bottom-6 left-0 right-0 flex justify-center z-40">
+        <div className="flex items-center gap-3 bg-black/70 text-white px-4 py-2 rounded-full shadow-lg">
+          <Button
+            size="icon"
+            variant={controls.mic ? "secondary" : "destructive"}
+            className="h-11 w-11 rounded-full"
+            onClick={toggleMic}
+          >
+            {controls.mic ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+          </Button>
+
+          <Button
+            size="icon"
+            variant={controls.cam ? "secondary" : "destructive"}
+            className="h-11 w-11 rounded-full"
+            onClick={toggleCam}
+          >
+            {controls.cam ? <Camera className="h-5 w-5" /> : <CameraOff className="h-5 w-5" />}
+          </Button>
+
+          <Button size="icon" variant="secondary" className="h-11 w-11 rounded-full" disabled>
+            <Captions className="h-5 w-5" />
+          </Button>
+
+          <Button size="icon" variant="secondary" className="h-11 w-11 rounded-full" disabled>
+            <Hand className="h-5 w-5" />
+          </Button>
+
+          <Button
+            size="icon"
+            variant={controls.screen ? "secondary" : "outline"}
+            className="h-11 w-11 rounded-full"
+            onClick={handleScreenShare}
+          >
+            <MonitorUp className="h-5 w-5" />
+          </Button>
+
+          <Button size="icon" variant="secondary" className="h-11 w-11 rounded-full" disabled>
+            <MoreHorizontal className="h-5 w-5" />
+          </Button>
+
+          <Button size="icon" variant="destructive" className="h-11 w-11 rounded-full" onClick={handleLeave}>
+            <PhoneOff className="h-5 w-5" />
+          </Button>
+        </div>
+      </div>
+
       {isHost && hostRequests.length > 0 && (
-        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-3">
+        <div className="fixed bottom-24 right-4 z-50 flex flex-col gap-3">
           {hostRequests.map((req) => (
             <div key={req.id} className="rounded-lg border bg-card shadow-lg p-3 w-72">
               <p className="text-sm font-semibold">Join request</p>
