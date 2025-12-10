@@ -161,12 +161,24 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
     }
     void init()
     return () => {
-      unsubSignals?.()
-      unsubRequests?.()
-      unsubHostRequests?.()
-      pcsRef.current.forEach((pc) => pc.close())
-      pcsRef.current.clear()
-      useMeetingStore.getState().reset()
+      try {
+        unsubSignals?.()
+        unsubRequests?.()
+        unsubHostRequests?.()
+      } catch {
+        /* ignore */
+      }
+      try {
+        pcsRef.current.forEach((pc) => pc.close())
+        pcsRef.current.clear()
+      } catch {
+        /* ignore */
+      }
+      try {
+        useMeetingStore.getState().reset()
+      } catch {
+        /* ignore */
+      }
     }
   }, [meetingId, supabase])
 
@@ -209,9 +221,25 @@ export default function MeetingRoomPage({ params }: { params: Promise<{ id: stri
   }
 
   const handleLeave = () => {
-    pcsRef.current.forEach((pc) => pc.close())
-    pcsRef.current.clear()
-    useMeetingStore.getState().reset()
+    try {
+      pcsRef.current.forEach((pc) => pc.close())
+      pcsRef.current.clear()
+    } catch {
+      /* ignore */
+    }
+    try {
+      const stream = useMeetingStore.getState().localStream
+      stream?.getTracks().forEach((t) => {
+        try {
+          t.stop()
+        } catch {
+          /* ignore */
+        }
+      })
+      useMeetingStore.getState().reset()
+    } catch {
+      /* ignore */
+    }
     router.push(`/meeting/${meetingId}`)
   }
 
