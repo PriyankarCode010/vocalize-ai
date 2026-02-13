@@ -26,7 +26,12 @@ export default function MeetingRoom() {
     sendSubtitle, 
     startCall, 
     connectionStatus,
-    error: rtcError
+    error: rtcError,
+    isHost,
+    guestStatus,
+    guestRequest,
+    approveGuest,
+    rejectGuest
   } = useWebRTC((text) => {
     setRemoteSubtitle(text);
     // Optional: Auto-speak remote subtitles?
@@ -100,12 +105,49 @@ export default function MeetingRoom() {
     });
   };
 
+  if (guestStatus === 'waiting') {
+      return (
+          <div className="flex flex-col h-screen items-center justify-center bg-neutral-950 text-white">
+              <h1 className="text-2xl font-bold mb-4">Waiting for Host...</h1>
+              <p className="text-neutral-400">The host has been notified of your request to join.</p>
+              <div className="mt-8 animate-pulse text-sm">Please wait...</div>
+          </div>
+      );
+  }
+
+  if (guestStatus === 'rejected') {
+      return (
+        <div className="flex flex-col h-screen items-center justify-center bg-neutral-950 text-white">
+            <h1 className="text-2xl font-bold mb-4 text-red-500">Access Denied</h1>
+            <p className="text-neutral-400">The host has declined your request to join.</p>
+        </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col h-screen bg-neutral-950 text-white p-4">
+    <div className="flex flex-col h-screen bg-neutral-950 text-white p-4 relative">
+      
+      {/* Host Approval Notification */}
+      {isHost && guestRequest && (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 bg-neutral-900 border border-neutral-700 p-4 rounded-xl shadow-2xl flex items-center gap-4 animate-in slide-in-from-top-4">
+              <div className="flex flex-col">
+                  <span className="font-bold text-sm">Guest Requesting to Join</span>
+                  <span className="text-xs text-neutral-400">ID: {guestRequest.slice(0, 8)}...</span>
+              </div>
+              <div className="flex gap-2">
+                  <Button size="sm" variant="destructive" onClick={() => rejectGuest(guestRequest)}>Deny</Button>
+                  <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => approveGuest(guestRequest)}>Approve</Button>
+              </div>
+          </div>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-xl font-bold flex items-center gap-2">
             Vocalize AI Meeting
+            <span className="text-xs bg-neutral-800 px-2 py-0.5 rounded text-neutral-400 font-normal">
+                {isHost ? 'Host' : 'Guest'}
+            </span>
         </h1>
         <div className="flex items-center gap-2">
             <Button 
@@ -123,13 +165,14 @@ export default function MeetingRoom() {
                 </span>
             )}
             <span className={`text-xs px-2 py-1 rounded-full ${
-                connectionStatus === 'connected' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
+                connectionStatus.includes('connected') ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
             }`}>
                 {connectionStatus}
             </span>
-            <Button size="sm" onClick={startCall} variant="outline" className="text-black bg-white hover:bg-gray-200">
+            {/* Start Call button only needed if manual start is required, but flow is auto now */}
+            {/* <Button size="sm" onClick={startCall} variant="outline" className="text-black bg-white hover:bg-gray-200">
                 Start Call (Initiator)
-            </Button>
+            </Button> */}
         </div>
       </div>
 
@@ -175,7 +218,7 @@ export default function MeetingRoom() {
             />
           ) : (
              <div className="flex items-center justify-center h-full text-neutral-500">
-                Waiting for peer...
+                {isHost ? "Waiting for guest to join..." : "Connecting to Host..."}
              </div>
           )}
 
