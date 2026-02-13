@@ -13,8 +13,6 @@ interface MeetingRoomProps {
 }
 
 export default function MeetingRoom({ roomId }: MeetingRoomProps) {
-  console.log('[MeetingRoom] 🖼️ Rendering MeetingRoom with roomId:', roomId);
-
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -53,7 +51,6 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     // Handle incoming remote subtitles
     try {
       const parsed = JSON.parse(data);
-      console.log('[MeetingRoom] 💬 Received remote subtitle:', parsed.text);
       
       // Only add remote subtitles, never speak local ones
       addRemoteSubtitle({
@@ -69,7 +66,6 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       }
     } catch (e) {
       // Fallback for raw string data
-      console.log('[MeetingRoom] 💬 Received raw remote subtitle:', data);
       if (data && data.trim().length > 0) {
         addRemoteSubtitle({
           text: data,
@@ -123,7 +119,6 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
         if (localVideoRef.current) {
           localVideoRef.current.muted = true;
           localVideoRef.current.play().then(() => {
-            console.log('[MeetingRoom] ✅ Local video playing after muted workaround');
             // Unmute after successful playback
             setTimeout(() => {
               if (localVideoRef.current) {
@@ -148,11 +143,8 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     if (!isMounted) return;
     
     if (remoteVideoRef.current && remoteStream) {
-      console.log('[MeetingRoom] 📺 Attaching remote stream to video element');
       remoteVideoRef.current.srcObject = remoteStream;
       remoteVideoRef.current.play().catch(e => console.error('[MeetingRoom] Error playing remote video:', e));
-    } else {
-        console.log('[MeetingRoom] ℹ️ Remote video ref or stream missing', { hasRef: !!remoteVideoRef.current, hasStream: !!remoteStream });
     }
   }, [remoteStream, isMounted]);
 
