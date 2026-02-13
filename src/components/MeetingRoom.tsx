@@ -11,6 +11,8 @@ interface MeetingRoomProps {
 }
 
 export default function MeetingRoom({ roomId }: MeetingRoomProps) {
+  console.log('[MeetingRoom] 🖼️ Rendering MeetingRoom with roomId:', roomId);
+
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -38,10 +40,15 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     rejectGuest,
     leaveCall
   } = useWebRTC((text) => {
+    console.log('[MeetingRoom] 💬 Received remote subtitle:', text);
     setRemoteSubtitle(text);
     // Optional: Auto-speak remote subtitles?
     // speak(text); 
   }, roomId);
+
+  useEffect(() => {
+      console.log(`[MeetingRoom] State Update: isHost=${isHost}, guestStatus=${guestStatus}, connection=${connectionStatus}`);
+  }, [isHost, guestStatus, connectionStatus]);
 
   const { 
     isInitialized, 
@@ -55,13 +62,19 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   // Attach streams to video elements
   useEffect(() => {
     if (localVideoRef.current && localStream) {
+      console.log('[MeetingRoom] 📹 Attaching local stream to video element');
       localVideoRef.current.srcObject = localStream;
+    } else {
+        console.log('[MeetingRoom] ⚠️ Local video ref or stream missing', { hasRef: !!localVideoRef.current, hasStream: !!localStream });
     }
   }, [localStream]);
 
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
+      console.log('[MeetingRoom] 📺 Attaching remote stream to video element');
       remoteVideoRef.current.srcObject = remoteStream;
+    } else {
+        console.log('[MeetingRoom] ℹ️ Remote video ref or stream missing', { hasRef: !!remoteVideoRef.current, hasStream: !!remoteStream });
     }
   }, [remoteStream]);
 

@@ -99,29 +99,52 @@ export function useWebRTC(
         // --- PC Handlers ---
         pc.onicecandidate = (event) => {
             if (event.candidate) {
+                console.log('[WebRTC] 🧊 Generated ICE candidate:', event.candidate.candidate);
                 channel.send({
                     type: 'broadcast',
                     event: 'signal',
                     payload: { type: 'candidate', candidate: event.candidate, from: myId }
                 });
+            } else {
+                console.log('[WebRTC] 🧊 ICE gathering complete');
             }
         };
 
+        pc.oniceconnectionstatechange = () => {
+            console.log('[WebRTC] 🔄 ICE Connection State Change:', pc.iceConnectionState);
+        };
+
+        pc.onconnectionstatechange = () => {
+            console.log('[WebRTC] 🔄 Connection State Change:', pc.connectionState);
+            if (pc.connectionState === 'connected') {
+                setConnectionStatus('connected');
+            } else if (pc.connectionState === 'failed') {
+                setConnectionStatus('failed');
+                setError('Connection failed. Please refresh.');
+            }
+        };
+
+        pc.onsignalingstatechange = () => {
+            console.log('[WebRTC] 🚦 Signaling State Change:', pc.signalingState);
+        };
+
         pc.ontrack = (event) => {
-            console.log('[WebRTC] Received remote track');
+            console.log('[WebRTC] 🎥 Received remote track:', event.streams[0].id);
             setRemoteStream(event.streams[0]);
-            setConnectionStatus('connected');
         };
 
         pc.ondatachannel = (event) => {
-            console.log('[WebRTC] Received data channel');
+            console.log('[WebRTC] 📨 Received data channel:', event.channel.label);
             const receiveChannel = event.channel;
             dataChannelRef.current = receiveChannel;
+            receiveChannel.onopen = () => console.log('[DataChannel] Open');
+            receiveChannel.onclose = () => console.log('[DataChannel] Closed');
             receiveChannel.onmessage = (e) => onSubtitleReceived(e.data);
         };
 
         // Add Tracks
         localStream.getTracks().forEach(track => {
+            console.log(`[WebRTC] Adding local track: ${track.kind} (${track.label})`);
             pc.addTrack(track, localStream);
         });
 
@@ -129,6 +152,7 @@ export function useWebRTC(
         channel
             .on('presence', { event: 'sync' }, () => {
                 const state = channel.presenceState();
+                console.log('[Presence] 👥 Sync:', state);
                 const users = Object.keys(state).map(key => {
                     const presence = state[key][0] as any;
                     return {
@@ -145,7 +169,7 @@ export function useWebRTC(
 
                     if (!amIHost && guestStatus === 'idle') {
                         // Automatically request to join if I'm a guest and haven't requested yet
-                        console.log('[Signaling] Requesting to join as Guest...');
+                        console.log('[Signaling] 👇 Requesting to join as Guest...');
                         setGuestStatus('waiting');
                         channel.send({
                             type: 'broadcast',
@@ -164,13 +188,13 @@ export function useWebRTC(
                 // Let's rely on the user interface to check `isHost` before showing the request.
                 // But we need to store the request.
                 if (payload.guestId !== myId) {
-                    console.log('[Signaling] Received Join Request from', payload.guestId);
+                    console.log('[Signaling] 📩 Received Join Request from', payload.guestId);
                     setGuestRequest(payload.guestId);
                 }
             })
             .on('broadcast', { event: 'approve-guest' }, ({ payload }: { payload: { guestId: string } }) => {
                 if (payload.guestId === myId) {
-                    console.log('[Signaling] Approved by Host! Waiting for offer...');
+                    console.log('[Signaling] ✅ Approved by Host! Waiting for offer...');
                     setGuestStatus('approved');
                     setConnectionStatus('connecting...');
                     // Host initiates the call usually, or Guest can now?
@@ -181,7 +205,7 @@ export function useWebRTC(
             })
             .on('broadcast', { event: 'reject-guest' }, ({ payload }: { payload: { guestId: string } }) => {
                 if (payload.guestId === myId) {
-                    console.log('[Signaling] Rejected by Host.');
+                    console.log('[Signaling] ❌ Rejected by Host.');
                     setGuestStatus('rejected');
                 }
             })
@@ -189,30 +213,46 @@ export function useWebRTC(
                 if (payload.from === myId) return; // Ignore own messages
 
                 try {
+                    console.log(`[Signaling] 📨 Received signal: ${payload.type} from ${payload.from}`);
+
                     if (payload.type === 'offer') {
-                        console.log('[Signaling] Received offer');
+                        console.log('[Signaling] Handling Offer...');
+                        if (pc.signalingState !== 'stable') {
+                            console.warn('[Signaling] Received offer in non-stable state, ignoring or rolling back? State:', pc.signalingState);
+                            // In a simple app, we might just proceed or error out.
+                            // Ideally, we should handle glare, but let's just log for now.
+                        }
                         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+                        console.log('[WebRTC] Remote description set (Offer)');
+
                         const answer = await pc.createAnswer();
+                        console.log('[WebRTC] Answer created');
                         await pc.setLocalDescription(answer);
+                        console.log('[WebRTC] Local description set (Answer)');
+
                         channel.send({
                             type: 'broadcast',
                             event: 'signal',
                             payload: { type: 'answer', sdp: answer.sdp, from: myId }
                         });
+                        console.log('[Signaling] Sent Answer');
 
                     } else if (payload.type === 'answer') {
-                        console.log('[Signaling] Received answer');
+                        console.log('[Signaling] Handling Answer...');
                         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+                        console.log('[WebRTC] Remote description set (Answer)');
 
                     } else if (payload.type === 'candidate') {
-                        console.log('[Signaling] Received ICE candidate');
+                        console.log('[Signaling] Handling ICE Candidate...');
                         await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+                        console.log('[WebRTC] Added ICE Candidate');
                     }
                 } catch (e) {
-                    console.error('[WebRTC] Error processing signal:', e);
+                    console.error('[WebRTC] 💥 Error processing signal:', e);
                 }
             })
             .subscribe(async (status: string) => {
+                console.log(`[Supabase] Channel status change: ${status}`);
                 if (status === 'SUBSCRIBED') {
                     console.log('[Signaling] Connected to Supabase channel:', roomId);
                     setConnectionStatus('connected to signaling');
@@ -232,29 +272,41 @@ export function useWebRTC(
         // Now called automatically when Host approves
         const pc = peerRef.current;
         const channel = channelRef.current;
-        if (!pc || !channel) return;
+        if (!pc || !channel) {
+            console.error('[useWebRTC] ❌ Cannot start call: PC or Channel missing', { pc: !!pc, channel: !!channel });
+            return;
+        }
 
-        console.log('[useWebRTC] Starting call (Creating Offer)...');
+        console.log('[useWebRTC] 📞 Starting call (Creating Offer)...');
 
         // Create Data Channel
-        const dataChannel = pc.createDataChannel('subtitles');
-        dataChannelRef.current = dataChannel;
-        dataChannel.onmessage = (e) => onSubtitleReceived(e.data);
+        try {
+            const dataChannel = pc.createDataChannel('subtitles');
+            console.log('[WebRTC] 📨 Created data channel: subtitles');
+            dataChannelRef.current = dataChannel;
+            dataChannel.onmessage = (e) => onSubtitleReceived(e.data);
 
-        // Create Offer
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
+            // Create Offer
+            const offer = await pc.createOffer();
+            console.log('[WebRTC] 📜 Offer created');
+            await pc.setLocalDescription(offer);
+            console.log('[WebRTC] 📜 Local description set (Offer)');
 
-        channel.send({
-            type: 'broadcast',
-            event: 'signal',
-            payload: { type: 'offer', sdp: offer, from: myId }
-        });
+            channel.send({
+                type: 'broadcast',
+                event: 'signal',
+                payload: { type: 'offer', sdp: offer, from: myId }
+            });
+            console.log('[Signaling] 📤 Sent Offer');
+        } catch (err) {
+            console.error('[useWebRTC] 💥 Error creating offer:', err);
+        }
     }, [myId, onSubtitleReceived]);
 
 
     const approveGuest = useCallback((guestId: string) => {
         if (!channelRef.current) return;
+        console.log('[useWebRTC] ✅ Approving guest:', guestId);
         channelRef.current.send({
             type: 'broadcast',
             event: 'approve-guest',
@@ -264,6 +316,7 @@ export function useWebRTC(
         // Determine who calls whom?
         // Let's say Host calls Guest upon approval.
         setTimeout(() => {
+            console.log('[useWebRTC] ⏳ Timeout trigger: Calling startCall()');
             startCall();
         }, 1000);
     }, [startCall]);
