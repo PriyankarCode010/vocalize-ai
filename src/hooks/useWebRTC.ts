@@ -11,6 +11,7 @@ interface UseWebRTCReturn {
     sendSubtitle: (text: string) => void;
     startCall: () => void;
     connectionStatus: string;
+    error: string | null;
 }
 
 export function useWebRTC(
@@ -19,6 +20,7 @@ export function useWebRTC(
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
     const [connectionStatus, setConnectionStatus] = useState<string>('disconnected');
+    const [error, setError] = useState<string | null>(null);
 
     const wsRef = useRef<WebSocket | null>(null);
     const peerRef = useRef<RTCPeerConnection | null>(null);
@@ -28,17 +30,19 @@ export function useWebRTC(
     // 1. Initialize Local Media (Once)
     useEffect(() => {
         let mounted = true;
+        console.log('[useWebRTC] Initializing local media...');
         const getMedia = async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 if (mounted) {
+                    console.log('[useWebRTC] Local media acquired');
                     setLocalStream(stream);
                 } else {
-                    // Cleanup if unmounted before release
                     stream.getTracks().forEach(t => t.stop());
                 }
             } catch (err) {
-                console.error('Error accessing media devices:', err);
+                console.error('[useWebRTC] Error accessing media devices:', err);
+                setError('Failed to access camera/microphone');
             }
         };
         getMedia();
@@ -47,11 +51,12 @@ export function useWebRTC(
 
     // 2. Initialize WebRTC & Signaling (Dependent on Local Stream)
     useEffect(() => {
-        // Wait for local stream before setting up P2P (simplifies track addition)
-        // Actually, we can setup PC first, but adding tracks is easier if stream exists.
-        // To allow "Late Joiner", we should just setup PC and add tracks if available.
+        if (!localStream) {
+            console.log('[useWebRTC] Waiting for local stream before init...');
+            return;
+        }
 
-        // Strict Mode: This effect runs twice. We must cleanup.
+        console.log('[useWebRTC] Initializing WebRTC/Signaling...');
 
         // Setup WebSocket
         const ws = new WebSocket(WEBSOCKET_URL);
@@ -62,9 +67,21 @@ export function useWebRTC(
         peerRef.current = pc;
 
         // --- WebSocket Handlers ---
-        ws.onopen = () => setConnectionStatus('connected to signaling');
-        ws.onclose = () => setConnectionStatus('disconnected');
-        ws.onerror = (err) => console.error('WS Error:', err);
+        ws.onopen = () => {
+            console.log('[Signaling] Connected');
+            setConnectionStatus('connected to signaling');
+            setError(null);
+        };
+
+        ws.onclose = () => {
+            console.log('[Signaling] Disconnected');
+            setConnectionStatus('disconnected');
+        };
+
+        ws.onerror = (err) => {
+            console.error('[Signaling] Error:', err);
+            setError('Signaling Server Error. Is it running on port 8080?');
+        };
 
         ws.onmessage = async (event) => {
             const message = JSON.parse(event.data);
@@ -72,108 +89,124 @@ export function useWebRTC(
 
             try {
                 if (message.type === 'offer') {
-                    console.log('Received offer');
+                    console.log('[Signaling] Received offer');
                     await peerRef.current.setRemoteDescription(new RTCSessionDescription(message));
 
                     // Process queued ICE candidates
                     while (iceCandidateQueue.current.length > 0) {
                         const candidate = iceCandidateQueue.current.shift();
-                        if (candidate) await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+                        if (candidate) {
+                            console.log('[WebRTC] Adding queued ICE candidate');
+                            await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+                        }
                     }
 
-                    // Add local tracks if we have them
+                    // Add local tracks
                     if (localStream) {
                         localStream.getTracks().forEach(track => {
-                            // Check if already added to avoid duplication? 
-                            // PC is new, so just add.
-                            peerRef.current?.addTrack(track, localStream);
+                            try {
+                                peerRef.current?.addTrack(track, localStream);
+                            } catch (e) {
+                                // Ignore if track already added
+                            }
                         });
                     }
 
                     const answer = await peerRef.current.createAnswer();
                     await peerRef.current.setLocalDescription(answer);
+                    console.log('[Signaling] Sending answer');
                     ws.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }));
 
                 } else if (message.type === 'answer') {
-                    console.log('Received answer');
+                    console.log('[Signaling] Received answer');
                     await peerRef.current.setRemoteDescription(new RTCSessionDescription(message));
+
                     // Process queued ICE candidates
                     while (iceCandidateQueue.current.length > 0) {
                         const candidate = iceCandidateQueue.current.shift();
-                        if (candidate) await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+                        if (candidate) {
+                            console.log('[WebRTC] Adding queued ICE candidate');
+                            await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+                        }
                     }
 
                 } else if (message.candidate) {
-                    console.log('Received ICE candidate');
+                    console.log('[Signaling] Received ICE candidate');
                     if (peerRef.current.remoteDescription) {
                         await peerRef.current.addIceCandidate(new RTCIceCandidate(message.candidate));
                     } else {
-                        // Queue it
-                        console.log('Queueing ICE candidate (no remote description)');
+                        console.log('[WebRTC] Queueing ICE candidate (no remote desc)');
                         iceCandidateQueue.current.push(message.candidate);
                     }
 
                 } else if (message.type === 'ready-to-call') {
-                    console.log('Match found! You can start the call.');
-                    // Optional: setConnectionStatus('ready to call')
+                    console.log('[Signaling] Peer ready to call');
                 }
             } catch (e) {
-                console.error('Signaling error:', e);
+                console.error('[WebRTC] Error processing message:', e);
+                setError('Error processing signaling message');
             }
         };
 
         // --- PC Handlers ---
         pc.onicecandidate = (event) => {
             if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
+                console.log('[WebRTC] Generated ICE candidate');
                 wsRef.current.send(JSON.stringify({ candidate: event.candidate }));
             }
         };
 
+        pc.oniceconnectionstatechange = () => {
+            console.log('[WebRTC] ICE Connection State:', pc.iceConnectionState);
+        };
+
         pc.ontrack = (event) => {
-            console.log('Received remote track');
+            console.log('[WebRTC] Received remote track');
             setRemoteStream(event.streams[0]);
             setConnectionStatus('connected');
         };
 
         pc.ondatachannel = (event) => {
-            console.log('Received data channel');
+            console.log('[WebRTC] Received data channel');
             const receiveChannel = event.channel;
             dataChannelRef.current = receiveChannel;
             receiveChannel.onmessage = (e) => onSubtitleReceived(e.data);
         };
 
-        // Add Tracks to PC immediately if stream exists
-        // (If stream comes LATER, we need another effect... see step 3)
-        if (localStream) {
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-        }
+        // Add Tracks
+        localStream.getTracks().forEach(track => {
+            pc.addTrack(track, localStream);
+        });
 
         return () => {
-            console.log("Cleaning up WebRTC");
+            console.log('[useWebRTC] Cleanup');
             ws.close();
             pc.close();
-            // Don't stop localStream here, keep it for re-renders
         };
-    }, [localStream]); // Re-run if localStream changes (to ensure tracks added to fresh PC)
-
+    }, [localStream]);
 
     // Start Call Logic
     const startCall = useCallback(async () => {
         const pc = peerRef.current;
         if (!pc) return;
 
-        console.log('Starting call...');
+        console.log('[useWebRTC] Starting call (Initiator)...');
+
         // Create Data Channel
         const dataChannel = pc.createDataChannel('subtitles');
         dataChannelRef.current = dataChannel;
         dataChannel.onmessage = (e) => onSubtitleReceived(e.data);
+        console.log('[WebRTC] Created data channel');
 
         // Create Offer
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+        console.log('[Signaling] Sending offer');
 
         if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+        } else {
+            setError('Cannot start call: Signaling disconnected');
         }
     }, [onSubtitleReceived]);
 
