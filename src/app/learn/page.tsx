@@ -48,7 +48,7 @@ export default function LearnPage() {
     setIsLoading(true)
 
     try {
-      // Build conversation history for the API
+      // Build conversation history for API
       const history = messages.map((msg) => ({
         role: msg.role,
         content: msg.content,
@@ -84,6 +84,7 @@ export default function LearnPage() {
         content: `Sorry, I encountered an error: ${error instanceof Error ? error.message : "Unknown error"}. Please try again.`,
         timestamp: new Date(),
       }
+
       setMessages((prev) => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
@@ -135,10 +136,12 @@ export default function LearnPage() {
                         : "bg-muted text-foreground"
                     }`}
                   >
-                    <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                    <p className="whitespace-pre-wrap wrap-break-word">{message.content}</p>
                     <p
                       className={`text-xs mt-2 ${
-                        message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground"
+                        message.role === "user"
+                          ? "text-primary-foreground/70"
+                          : "text-muted-foreground"
                       }`}
                     >
                       {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
@@ -146,46 +149,46 @@ export default function LearnPage() {
                   </div>
                 </div>
               ))}
-              {isLoading && (
-                <div className="flex justify-start">
-                  <div className="bg-muted text-foreground rounded-lg px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                      <div className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                      <div className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                    </div>
+            </div>
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="bg-muted text-foreground rounded-lg px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <div className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <div className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                   </div>
                 </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Input Form */}
-            <form onSubmit={handleSubmit} className="border-t border-border p-4">
-              <div className="flex gap-2">
-                <Textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Ask me anything about sign language, communication, or learning..."
-                  className="min-h-[60px] max-h-[120px] resize-none"
-                  disabled={isLoading}
-                />
-                <Button
-                  type="submit"
-                  disabled={!input.trim() || isLoading}
-                  className="bg-primary hover:bg-primary/90 text-primary-foreground"
-                  size="lg"
-                >
-                  <PaperAirplaneIcon className="w-5 h-5" />
-                </Button>
               </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                Press Enter to send, Shift+Enter for new line
-              </p>
-            </form>
+            )}
+            <div ref={messagesEndRef} />
           </CardContent>
+
+          {/* Input Form */}
+          <form onSubmit={handleSubmit} className="border-t border-border p-4">
+            <div className="flex gap-2">
+              <Textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask me anything about sign language, communication, or learning..."
+                className="min-h-[60px] max-h-[120px] resize-none"
+                disabled={isLoading}
+              />
+              <Button
+                type="submit"
+                disabled={!input.trim() || isLoading}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                size="lg"
+              >
+                <PaperAirplaneIcon className="w-5 h-5" />
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Press Enter to send, Shift+Enter for new line
+            </p>
+          </form>
         </Card>
       </div>
     </div>
