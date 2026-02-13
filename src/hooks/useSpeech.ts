@@ -23,14 +23,29 @@ export function useSpeech(): UseSpeechReturn {
         // Ensure proper spacing after punctuation
         formatted = formatted.replace(/([.!?])([^\s])/g, '$1 $2');
         
-        // Handle common ASL-to-text issues
-        formatted = formatted.replace(/\b([A-Z])\b/g, (match, letter) => {
-            // If it's a single capital letter, it might be fingerspelling
-            // Only convert if it's part of a longer word or stands alone
-            return letter.toLowerCase();
-        });
+        // Handle common ASL-to-text issues - merge consecutive single characters
+        const words = formatted.split(' ');
+        const mergedWords: string[] = [];
+        let currentWord = '';
         
-        return formatted;
+        for (const word of words) {
+            if (word.length === 1 && word.match(/[A-Za-z]/)) {
+                // Single character, likely fingerspelling
+                currentWord += word;
+            } else {
+                if (currentWord) {
+                    mergedWords.push(currentWord);
+                    currentWord = '';
+                }
+                mergedWords.push(word);
+            }
+        }
+        
+        if (currentWord) {
+            mergedWords.push(currentWord);
+        }
+        
+        return mergedWords.join(' ').trim();
     }, []);
 
     const speak = useCallback((text: string, onComplete?: () => void): void => {
@@ -92,10 +107,9 @@ export function useSpeech(): UseSpeechReturn {
         
         // Start speaking
         window.speechSynthesis.speak(utterance);
-        return;
     }, [formatText]);
 
-    const stop = useCallback(() => {
+    const stop = useCallback((): void => {
         if ('speechSynthesis' in window) {
             window.speechSynthesis.cancel();
             isSpeakingRef.current = false;
@@ -103,7 +117,5 @@ export function useSpeech(): UseSpeechReturn {
         }
     }, []);
 
-    const isSpeaking = isSpeakingRef.current;
-
-    return { speak, stop, isSpeaking };
+    return { speak, stop, isSpeaking: isSpeakingRef.current };
 }

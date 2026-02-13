@@ -61,9 +61,15 @@ export function useWebRTC(
         console.log('[useWebRTC] Initializing local media...', id);
         const getMedia = async () => {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }, 
+                    audio: true 
+                });
                 if (mounted) {
-                    console.log('[useWebRTC] Local media acquired');
+                    console.log('[useWebRTC] Local media acquired with tracks:', stream.getTracks().length);
                     setLocalStream(stream);
                 } else {
                     stream.getTracks().forEach(t => t.stop());
@@ -74,7 +80,9 @@ export function useWebRTC(
             }
         };
         getMedia();
-        return () => { mounted = false; };
+        return () => { 
+            mounted = false;
+        };
     }, []);
 
     // 2. Initialize Supabase Realtime & WebRTC
@@ -129,19 +137,25 @@ export function useWebRTC(
         };
 
         pc.ontrack = (event) => {
-            console.log('[WebRTC] 🎥 Received remote track:', event.track.kind);
+            console.log('[WebRTC] 🎥 Received remote track:', event.track.kind, event.track.id);
 
             setRemoteStream((prev) => {
-                const stream = prev || new MediaStream();
-
-                // Add the new track if it's not already there
-                const alreadyHasTrack = stream.getTracks().some(t => t.id === event.track.id);
-                if (!alreadyHasTrack) {
-                    stream.addTrack(event.track);
+                if (prev) {
+                    // Check if we already have this track
+                    const existingTrack = prev.getTracks().find(t => t.id === event.track.id);
+                    if (existingTrack) {
+                        console.log('[WebRTC] Track already exists, skipping');
+                        return prev;
+                    }
+                    
+                    // Add new track to existing stream
+                    const newStream = new MediaStream(prev.getTracks());
+                    newStream.addTrack(event.track);
+                    return newStream;
+                } else {
+                    // Create new stream with this track
+                    return new MediaStream([event.track]);
                 }
-
-                // Return a NEW MediaStream object to trigger React state updates
-                return new MediaStream(stream.getTracks());
             });
         };
 

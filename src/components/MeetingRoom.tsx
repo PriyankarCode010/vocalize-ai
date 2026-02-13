@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+"use client"
+
+import React, { useEffect, useRef, useState } from 'react';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useASLRecognition, drawLandmarks } from '@/hooks/useASLRecognition';
-import { useSentenceBuilder } from '@/hooks/useSentenceBuilder';
-import { useTTS } from '@/hooks/useTTS';
+import { useSubtitles } from '@/hooks/useSubtitles';
+import { useSpeech } from '@/hooks/useSpeech';
 import { Button } from '@/components/ui/button';
 import { Mic, MicOff, Video, VideoOff, Volume2, X, Share2, Copy, Check, PhoneOff } from 'lucide-react';
 
@@ -17,14 +19,22 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
-  const [remoteSubtitle, setRemoteSubtitle] = useState('');
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
 
-  // Hooks
-  const { speak } = useTTS();
-  const { sentenceString, addToSentence, clearSentence } = useSentenceBuilder();
+  // Initialize hooks
+  const { speak: speakText, stop, isSpeaking } = useSpeech();
+  const { 
+    localSubtitles, 
+    remoteSubtitles, 
+    addLocalPrediction, 
+    addRemoteSubtitle, 
+    clearLocalSubtitles, 
+    clearRemoteSubtitles,
+    getSubtitleData 
+  } = useSubtitles();
   
   const { 
     localStream, 
@@ -40,29 +50,43 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     rejectGuest,
     leaveCall
   } = useWebRTC((data) => {
-    // Expecting JSON or raw string
-    let text = data;
-    let shouldSpeak = true;
-    
+    // Handle incoming remote subtitles
     try {
-        const parsed = JSON.parse(data);
-        text = parsed.text;
-        shouldSpeak = parsed.speak !== false;
+      const parsed = JSON.parse(data);
+      console.log('[MeetingRoom] 💬 Received remote subtitle:', parsed.text);
+      
+      // Only add remote subtitles, never speak local ones
+      addRemoteSubtitle({
+        text: parsed.text,
+        timestamp: Date.now(),
+        isFinal: parsed.isFinal || false
+      });
+      
+      // Only speak if it's marked as final and has content
+      if (parsed.isFinal && parsed.text && parsed.text.trim().length > 0) {
+        speakText(parsed.text);
+        setTimeout(() => clearRemoteSubtitles(), 2000); // Clear after 2 seconds
+      }
     } catch (e) {
-        // Fallback to raw string
-    }
-
-    console.log('[MeetingRoom] 💬 Received remote subtitle:', text);
-    setRemoteSubtitle(text);
-    
-    if (shouldSpeak && text && text.trim().length > 0) {
-        // Only speak if it's significantly changed or ends in space/punctuation
-        // to avoid stuttering on every character sign
-        if (text.endsWith(' ') || text.length > 20) {
-            speak(text);
-        }
+      // Fallback for raw string data
+      console.log('[MeetingRoom] 💬 Received raw remote subtitle:', data);
+      if (data && data.trim().length > 0) {
+        addRemoteSubtitle({
+          text: data,
+          timestamp: Date.now(),
+          isFinal: true
+        });
+        
+        speakText(data);
+        setTimeout(() => clearRemoteSubtitles(), 2000); // Clear after 2 seconds
+      }
     }
   }, roomId);
+
+  // Handle client-side mounting to prevent hydration errors
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   useEffect(() => {
       console.log(`[MeetingRoom] State Update: isHost=${isHost}, guestStatus=${guestStatus}, connection=${connectionStatus}`);
@@ -74,11 +98,13 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     landmarks 
   } = useASLRecognition({ 
     videoRef: localVideoRef, 
-    enabled: !isVideoOff 
+    enabled: !isVideoOff && isMounted 
   });
 
-  // Attach streams to video elements
+  // Attach streams to video elements (only after mount)
   useEffect(() => {
+    if (!isMounted) return;
+    
     if (localVideoRef.current && localStream) {
       console.log('[MeetingRoom] 📹 Attaching local stream to video element');
       localVideoRef.current.srcObject = localStream;
@@ -86,46 +112,55 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     } else {
         console.log('[MeetingRoom] ⚠️ Local video ref or stream missing', { hasRef: !!localVideoRef.current, hasStream: !!localStream });
     }
-  }, [localStream]);
+  }, [localStream, isMounted]);
 
   useEffect(() => {
+    if (!isMounted) return;
+    
     if (remoteVideoRef.current && remoteStream) {
       console.log('[MeetingRoom] 📺 Attaching remote stream to video element');
       remoteVideoRef.current.srcObject = remoteStream;
-      // Explicitly try to play
       remoteVideoRef.current.play().catch(e => console.error('[MeetingRoom] Error playing remote video:', e));
     } else {
         console.log('[MeetingRoom] ℹ️ Remote video ref or stream missing', { hasRef: !!remoteVideoRef.current, hasStream: !!remoteStream });
     }
-  }, [remoteStream]);
+  }, [remoteStream, isMounted]);
 
   // Handle ASL Predictions
   useEffect(() => {
-    if (currentPrediction) {
-      addToSentence(currentPrediction);
+    if (currentPrediction && isMounted) {
+      addLocalPrediction(currentPrediction);
     }
-  }, [currentPrediction, addToSentence]);
+  }, [currentPrediction, addLocalPrediction, isMounted]);
 
-  // Sync Sentence with Remote
+  // Sync Local Subtitles with Remote
   useEffect(() => {
-    // Send with speak: false for real-time subtitle updates
-    // only set speak: true if we have a finished word
-    const isFinalWord = sentenceString.endsWith(' ');
-    sendSubtitle(JSON.stringify({ 
-        text: sentenceString, 
-        speak: isFinalWord 
-    }));
-  }, [sentenceString, sendSubtitle]);
+    if (!isMounted) return;
+    
+    const subtitleData = getSubtitleData();
+    if (subtitleData.text) {
+      sendSubtitle(JSON.stringify(subtitleData));
+    }
+  }, [localSubtitles, sendSubtitle, getSubtitleData, isMounted]);
 
   // Draw Landmarks
   useEffect(() => {
-    if (!canvasRef.current || !landmarks) return;
+    if (!isMounted || !canvasRef.current || !landmarks) return;
     const ctx = canvasRef.current.getContext('2d');
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     drawLandmarks(ctx, landmarks);
-  }, [landmarks]);
+  }, [landmarks, isMounted]);
+
+  // Don't render until mounted to prevent hydration errors
+  if (!isMounted) {
+    return (
+      <div className="flex flex-col h-screen items-center justify-center bg-neutral-950 text-white">
+        <div className="animate-pulse">Loading meeting room...</div>
+      </div>
+    );
+  }
 
   // Toggle Mute/Video
   const toggleMute = () => {
@@ -143,8 +178,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   };
 
   const handleShare = () => {
-    const url = window.location.href;
-    navigator.clipboard.writeText(url).then(() => {
+    navigator.clipboard.writeText(roomId).then(() => {
         setIsCopied(true);
         setTimeout(() => setIsCopied(false), 2000);
     });
@@ -189,7 +223,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-xl font-bold flex items-center gap-2">
-            Vocalize AI Meeting
+            Vocalize Meeting
             <span className="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground font-normal">
                 {isHost ? 'Host' : 'Guest'}
             </span>
@@ -244,7 +278,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
           
           <div className="absolute bottom-4 left-4 right-4 bg-background/60 p-3 rounded-lg backdrop-blur-sm border border-border/50">
             <p className="text-xs text-muted-foreground mb-1">Your Sentence:</p>
-            <p className="text-lg font-medium min-h-[1.5rem]">{sentenceString || "Start signing..."}</p>
+            <p className="text-lg font-medium min-h-[1.5rem]">{localSubtitles || "Start signing..."}</p>
           </div>
 
           <div className="absolute top-4 left-4 bg-background/50 px-2 py-1 rounded text-xs border border-border/30 backdrop-blur-sm">
@@ -268,9 +302,9 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
           )}
 
           {/* Remote Subtitles */}
-          {remoteSubtitle && (
+          {remoteSubtitles && (
             <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-popover/80 px-6 py-3 rounded-full backdrop-blur-md border border-border shadow-xl">
-               <p className="text-xl font-semibold text-center text-popover-foreground">{remoteSubtitle}</p>
+               <p className="text-xl font-semibold text-center text-popover-foreground">{remoteSubtitles}</p>
             </div>
           )}
 
@@ -307,7 +341,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
          <Button 
             variant="outline" 
             className="rounded-full gap-2 hover:bg-muted"
-            onClick={clearSentence}
+            onClick={() => clearLocalSubtitles()}
          >
             <X className="h-4 w-4" />
             Clear
@@ -315,8 +349,12 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 
          <Button 
             className="rounded-full gap-2"
-            onClick={() => speak(sentenceString)}
-            disabled={!sentenceString}
+            onClick={() => {
+              if (localSubtitles) {
+                speakText(localSubtitles);
+              }
+            }}
+            disabled={!localSubtitles}
          >
             <Volume2 className="h-4 w-4" />
             Speak

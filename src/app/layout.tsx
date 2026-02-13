@@ -10,8 +10,8 @@ import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
 
 export const metadata: Metadata = {
-  title: "vocalize-ai - AI-Powered Communication",
-  description: "Breaking communication barriers with AI-powered hand sign recognition and speech synthesis",
+  title: "vocalize - Smart Communication",
+  description: "Breaking communication barriers with smart hand sign recognition and speech synthesis",
   generator: "v0.app",
 }
 

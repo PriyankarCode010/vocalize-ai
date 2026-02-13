@@ -21,10 +21,10 @@ export default function HomePage() {
       <section className="py-20 px-4">
         <div className="container mx-auto text-center max-w-4xl">
           <Badge variant="secondary" className="mb-4">
-            AI-Powered Communication
+            Smart Communication
           </Badge>
           <h1 className="text-4xl md:text-6xl font-bold text-foreground mb-6 text-balance">
-            Breaking Communication Barriers with <span className="text-accent">AI Technology</span>
+            Breaking Communication Barriers with <span className="text-accent">Technology</span>
           </h1>
           <p className="text-xl text-muted-foreground mb-8 text-pretty max-w-2xl mx-auto">
             Empowering individuals with hearing and speech disabilities to communicate effortlessly through advanced
@@ -52,7 +52,7 @@ export default function HomePage() {
                 </div>
                 <div className="text-center">
                   <ArrowRightIcon className="w-8 h-8 text-accent mx-auto mb-4" />
-                  <p className="text-sm text-muted-foreground">AI Processing</p>
+                  <p className="text-sm text-muted-foreground">Smart Processing</p>
                 </div>
                 <div className="text-center">
                   <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -74,7 +74,7 @@ export default function HomePage() {
               Comprehensive Communication Solution
             </h2>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-              Our AI-powered platform offers bidirectional communication support with cutting-edge technology
+              Our smart platform offers bidirectional communication support with cutting-edge technology
             </p>
           </div>
 
@@ -110,7 +110,7 @@ export default function HomePage() {
                 </div>
                 <CardTitle>Multilingual Support</CardTitle>
                 <CardDescription>
-                  Support for multiple languages and regional sign language variations powered by Sarvam AI
+                  Support for multiple languages and regional sign language variations powered by Sarvam
                 </CardDescription>
               </CardHeader>
             </Card>
@@ -134,7 +134,7 @@ export default function HomePage() {
                 </div>
                 <CardTitle>Real-time Processing</CardTitle>
                 <CardDescription>
-                  Lightning-fast AI processing ensures smooth, natural conversations without delays
+                  Lightning-fast processing ensures smooth, natural conversations without delays
                 </CardDescription>
               </CardHeader>
             </Card>
@@ -158,8 +158,8 @@ export default function HomePage() {
       <section className="py-20 px-4">
         <div className="container mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">How vocalize-ai Works</h2>
-            <p className="text-xl text-muted-foreground">Simple, intuitive, and powered by advanced AI technology</p>
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">How vocalize Works</h2>
+            <p className="text-xl text-muted-foreground">Simple, intuitive, and powered by advanced technology</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
@@ -184,7 +184,7 @@ export default function HomePage() {
                 <div>
                   <h3 className="text-xl font-semibold text-foreground mb-2">AI Processing</h3>
                   <p className="text-muted-foreground">
-                    Our AI models, powered by Sarvam AI, process and interpret the signs with high accuracy across
+                    Our smart models, powered by Sarvam, process and interpret the signs with high accuracy across
                     multiple languages.
                   </p>
                 </div>
@@ -222,7 +222,7 @@ export default function HomePage() {
         <div className="container mx-auto max-w-2xl">
           <div className="text-center mb-12">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">Request a Demo</h2>
-            <p className="text-xl text-muted-foreground">Experience the power of AI-driven communication technology</p>
+            <p className="text-xl text-muted-foreground">Experience the power of smart-driven communication technology</p>
           </div>
 
           <Card className="border-border">
@@ -256,7 +256,7 @@ export default function HomePage() {
                   </label>
                   <Textarea
                     id="message"
-                    placeholder="How would you like to use vocalize-ai? Any specific requirements?"
+                    placeholder="How would you like to use vocalize? Any specific requirements?"
                     rows={4}
                   />
                 </div>
