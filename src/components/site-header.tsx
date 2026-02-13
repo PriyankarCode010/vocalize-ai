@@ -39,6 +39,7 @@ const NAV_LINKS = [
   { label: "Features", href: "/#features" },
   { label: "Demo", href: "/demo" },
   { label: "Meeting", href: "/meeting" },
+  { label: "Learn", href: "/learn" },
 ]
 
 export function SiteHeader() {
