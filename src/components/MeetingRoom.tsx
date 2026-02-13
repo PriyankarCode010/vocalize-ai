@@ -39,11 +39,29 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     approveGuest,
     rejectGuest,
     leaveCall
-  } = useWebRTC((text) => {
+  } = useWebRTC((data) => {
+    // Expecting JSON or raw string
+    let text = data;
+    let shouldSpeak = true;
+    
+    try {
+        const parsed = JSON.parse(data);
+        text = parsed.text;
+        shouldSpeak = parsed.speak !== false;
+    } catch (e) {
+        // Fallback to raw string
+    }
+
     console.log('[MeetingRoom] 💬 Received remote subtitle:', text);
     setRemoteSubtitle(text);
-    // Optional: Auto-speak remote subtitles?
-    speak(text); 
+    
+    if (shouldSpeak && text && text.trim().length > 0) {
+        // Only speak if it's significantly changed or ends in space/punctuation
+        // to avoid stuttering on every character sign
+        if (text.endsWith(' ') || text.length > 20) {
+            speak(text);
+        }
+    }
   }, roomId);
 
   useEffect(() => {
@@ -89,7 +107,13 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 
   // Sync Sentence with Remote
   useEffect(() => {
-    sendSubtitle(sentenceString);
+    // Send with speak: false for real-time subtitle updates
+    // only set speak: true if we have a finished word
+    const isFinalWord = sentenceString.endsWith(' ');
+    sendSubtitle(JSON.stringify({ 
+        text: sentenceString, 
+        speak: isFinalWord 
+    }));
   }, [sentenceString, sendSubtitle]);
 
   // Draw Landmarks
@@ -229,14 +253,14 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 
         {/* Remote Feed */}
         <div className="relative bg-neutral-900 rounded-2xl overflow-hidden border border-neutral-800">
-          {remoteStream ? (
-            <video 
-                ref={remoteVideoRef} 
-                autoPlay 
-                playsInline 
-                className="w-full h-full object-cover" 
-            />
-          ) : (
+          <video 
+              ref={remoteVideoRef} 
+              autoPlay 
+              playsInline 
+              className={`w-full h-full object-cover ${!remoteStream ? 'hidden' : ''}`} 
+          />
+          
+          {!remoteStream && (
              <div className="flex items-center justify-center h-full text-neutral-500">
                 {isHost ? "Waiting for guest to join..." : "Connecting to Host..."}
              </div>
@@ -249,7 +273,8 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             </div>
           )}
 
-           <div className="absolute top-4 left-4 bg-black/50 px-2 py-1 rounded text-xs">
+           <div className="absolute top-4 left-4 bg-black/50 px-2 py-1 rounded text-xs flex items-center gap-2">
+             <div className={`w-2 h-2 rounded-full ${remoteStream ? 'bg-green-500' : 'bg-red-500'}`} />
              Remote User
            </div>
         </div>

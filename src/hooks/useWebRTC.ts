@@ -240,6 +240,19 @@ export function useWebRTC(
                         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
                         console.log('[WebRTC] Remote description set (Offer)');
 
+                        // Process queued candidates
+                        while (iceCandidateQueue.current.length > 0) {
+                            const cand = iceCandidateQueue.current.shift();
+                            if (cand) {
+                                try {
+                                    await pc.addIceCandidate(new RTCIceCandidate(cand));
+                                    console.log('[WebRTC] Processed queued candidate');
+                                } catch (e) {
+                                    console.error('[WebRTC] Error processing queued candidate:', e);
+                                }
+                            }
+                        }
+
                         const answer = await pc.createAnswer();
                         console.log('[WebRTC] Answer created');
                         await pc.setLocalDescription(answer);
@@ -257,10 +270,28 @@ export function useWebRTC(
                         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
                         console.log('[WebRTC] Remote description set (Answer)');
 
+                        // Process queued candidates
+                        while (iceCandidateQueue.current.length > 0) {
+                            const cand = iceCandidateQueue.current.shift();
+                            if (cand) {
+                                try {
+                                    await pc.addIceCandidate(new RTCIceCandidate(cand));
+                                    console.log('[WebRTC] Processed queued candidate');
+                                } catch (e) {
+                                    console.error('[WebRTC] Error processing queued candidate:', e);
+                                }
+                            }
+                        }
+
                     } else if (payload.type === 'candidate') {
                         console.log('[Signaling] Handling ICE Candidate...');
-                        await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
-                        console.log('[WebRTC] Added ICE Candidate');
+                        if (pc.remoteDescription) {
+                            await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+                            console.log('[WebRTC] Added ICE Candidate');
+                        } else {
+                            console.log('[WebRTC] Queuing ICE Candidate (Remote description not yet set)');
+                            iceCandidateQueue.current.push(payload.candidate);
+                        }
                     }
                 } catch (e) {
                     console.error('[WebRTC] 💥 Error processing signal:', e);
