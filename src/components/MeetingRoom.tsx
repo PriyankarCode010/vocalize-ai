@@ -4,7 +4,7 @@ import { useASLRecognition, drawLandmarks } from '@/hooks/useASLRecognition';
 import { useSentenceBuilder } from '@/hooks/useSentenceBuilder';
 import { useTTS } from '@/hooks/useTTS';
 import { Button } from '@/components/ui/button';
-import { Mic, MicOff, Video, VideoOff, Volume2, X } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Volume2, X, Share2, Copy, Check } from 'lucide-react';
 
 export default function MeetingRoom() {
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -14,6 +14,7 @@ export default function MeetingRoom() {
   const [remoteSubtitle, setRemoteSubtitle] = useState('');
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
 
   // Hooks
   const { speak } = useTTS();
@@ -90,12 +91,31 @@ export default function MeetingRoom() {
     }
   };
 
+  const handleShare = () => {
+    const url = window.location.href;
+    navigator.clipboard.writeText(url).then(() => {
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+    });
+  };
+
   return (
     <div className="flex flex-col h-screen bg-neutral-950 text-white p-4">
       {/* Header */}
       <div className="flex justify-between items-center mb-4">
-        <h1 className="text-xl font-bold">Vocalize AI Meeting</h1>
+        <h1 className="text-xl font-bold flex items-center gap-2">
+            Vocalize AI Meeting
+        </h1>
         <div className="flex items-center gap-2">
+            <Button 
+                size="sm" 
+                variant="outline" 
+                className="text-black bg-white hover:bg-gray-200 gap-2"
+                onClick={handleShare}
+            >
+                {isCopied ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
+                {isCopied ? "Copied!" : "Share Link"}
+            </Button>
             <span className={`text-xs px-2 py-1 rounded-full ${
                 connectionStatus === 'connected' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
             }`}>
