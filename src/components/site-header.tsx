@@ -3,7 +3,6 @@
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
-
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/ui/theme-toggle"
 import { cn } from "@/lib/utils"
@@ -12,8 +11,8 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 
 type Profile = {
   id: string
-  display_name: string | null
-  avatar_url: string | null
+  display_name?: string | null
+  avatar_url?: string | null
 }
 
 const AVATAR_COLORS = ["#F44336", "#E91E63", "#9C27B0", "#3F51B5", "#03A9F4", "#009688", "#4CAF50", "#FF9800", "#795548"]
@@ -25,7 +24,7 @@ function getInitials(name: string, fallback: string) {
   return (parts[0][0] + parts[1][0]).toUpperCase()
 }
 
-function pickColor(seed: string) {
+function getAvatarColor(seed: string) {
   let hash = 0
   for (let i = 0; i < seed.length; i++) {
     hash = (hash * 31 + seed.charCodeAt(i)) | 0
@@ -37,9 +36,8 @@ function pickColor(seed: string) {
 const NAV_LINKS = [
   { label: "Home", href: "/" },
   { label: "Features", href: "/#features" },
-  { label: "Demo", href: "/demo" },
+  { label: "Learn", href: "/demo" },
   { label: "Meeting", href: "/meeting" },
-  { label: "Learn", href: "/learn" },
 ]
 
 export function SiteHeader() {
@@ -87,84 +85,76 @@ export function SiteHeader() {
   useEffect(() => {
     refreshAuth()
     void loadProfile()
-    const onFocus = () => {
-      refreshAuth()
-      void loadProfile()
-    }
-    window.addEventListener("focus", onFocus)
-    return () => {
-      window.removeEventListener("focus", onFocus)
-    }
-  }, [refreshAuth, loadProfile])
-
-  const handleLogout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" })
-    refreshAuth()
-    router.push("/")
-  }
+  }, [])
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur supports-backdrop-filter:bg-background/70">
-      <div className="container mx-auto flex items-center justify-between px-4 py-4">
-        <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight text-lg">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary">V</span>
-          vocalize
-        </Link>
+    <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter:saturate(0%)">
+      <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+        <div className="flex items-center space-x-4">
+          <span className="text-xl font-bold">Vocalize AI</span>
+        </div>
 
-        <nav className="hidden items-center gap-6 text-sm font-medium md:flex">
-          {NAV_LINKS.map((link) => (
+        <nav className="hidden md:flex items-center space-x-6">
+          {NAV_LINKS.map((item) => (
             <Link
-              key={link.href}
-              href={link.href}
+              key={item.href}
+              href={item.href}
               className={cn(
-                "transition-colors hover:text-foreground",
-                pathname === link.href ? "text-foreground" : "text-muted-foreground"
+                "text-sm font-medium transition-colors hover:text-foreground/80",
+                pathname === item.href ? "text-foreground" : "text-foreground/60"
               )}
             >
-              {link.label}
+              {item.label}
             </Link>
           ))}
         </nav>
 
-        <div className="flex items-center gap-2">
-          <ThemeToggle />
+        <div className="flex items-center space-x-4">
           {isAuthenticated ? (
             <>
-              <div className="flex items-center gap-2 rounded-full border px-2 py-1">
-                <div
-                  className="h-8 w-8 overflow-hidden rounded-full"
-                  style={{
-                    background: profile?.avatar_url ? undefined : pickColor(profile?.id || "you"),
-                  }}
-                >
-                  {profile?.avatar_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={profile.avatar_url} alt={profile.display_name || "Profile"} className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white">
-                      {getInitials(profile?.display_name || profile?.id || "User", "User")}
-                    </div>
-                  )}
-                </div>
-                <span className="hidden sm:inline text-sm font-medium">{profile?.display_name || profile?.id || "User"}</span>
+              <div className="relative">
+                {profile?.avatar_url ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt={profile.display_name || "User"}
+                    className="h-8 w-8 rounded-full object-cover"
+                  />
+                ) : (
+                  <div
+                    className={cn(
+                      "h-8 w-8 rounded-full flex items-center justify-center text-sm font-medium",
+                      getAvatarColor(profile?.display_name || "")
+                    )}
+                  >
+                    {profile?.display_name?.[0]?.toUpperCase() || "U"}
+                  </div>
+                )}
               </div>
-              <Button size="sm" onClick={handleLogout}>
-                Log out
+              <span className="text-sm text-muted-foreground ml-2">
+                {profile?.display_name || "User"}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  supabase?.auth.signOut()
+                  setIsAuthenticated(false)
+                  setProfile(null)
+                  router.push("/")
+                }}
+              >
+                Sign Out
               </Button>
             </>
           ) : (
-            <>
-              <Button asChild variant="ghost" size="sm" className="hidden sm:inline-flex">
-                <Link href="/login">Log in</Link>
+            <Link href="/login">
+              <Button variant="outline" size="sm">
+                Sign In
               </Button>
-              <Button asChild size="sm">
-                <Link href="/signup">Get started</Link>
-              </Button>
-            </>
+            </Link>
           )}
         </div>
       </div>
     </header>
   )
 }
-
