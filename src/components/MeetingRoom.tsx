@@ -25,7 +25,8 @@ export default function MeetingRoom() {
     remoteStream, 
     sendSubtitle, 
     startCall, 
-    connectionStatus 
+    connectionStatus,
+    error: rtcError
   } = useWebRTC((text) => {
     setRemoteSubtitle(text);
     // Optional: Auto-speak remote subtitles?
@@ -116,6 +117,11 @@ export default function MeetingRoom() {
                 {isCopied ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
                 {isCopied ? "Copied!" : "Share Link"}
             </Button>
+            {rtcError && (
+                <span className="text-xs px-2 py-1 rounded-full bg-red-500/20 text-red-500 font-bold animate-pulse">
+                    {rtcError}
+                </span>
+            )}
             <span className={`text-xs px-2 py-1 rounded-full ${
                 connectionStatus === 'connected' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
             }`}>

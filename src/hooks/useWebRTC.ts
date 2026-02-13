@@ -183,5 +183,5 @@ export function useWebRTC(
         }
     }, []);
 
-    return { localStream, remoteStream, sendSubtitle, startCall, connectionStatus };
+    return { localStream, remoteStream, sendSubtitle, startCall, connectionStatus, error };
 }
