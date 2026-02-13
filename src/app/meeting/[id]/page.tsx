@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Loader2, Mic, MicOff, Camera, CameraOff, MoreHorizontal, PhoneOff } from "lucide-react"
 import type { Meeting, MeetingRequest } from "@/types/meeting"
+import MeetingRoom from "@/components/MeetingRoom"
 
 export default function MeetingLobbyPage({ params }: { params: Promise<{ id: string }> }) {
   const meetingParams = React.use(params)
@@ -334,16 +335,10 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
             <div className="flex flex-col gap-3">
               <Button
                 className="h-12 rounded-full text-base"
-                onClick={handleJoinClick}
-                disabled={!localStream || requestingJoin || joinStatus === "waiting"}
+                onClick={() => router.push(`/meeting/${meetingId}/room`)}
+                disabled={!localStream}
               >
-                {isHost
-                  ? "Join now"
-                  : joinStatus === "waiting"
-                    ? "Waiting for host approval..."
-                    : joinStatus === "rejected"
-                      ? "Request again"
-                      : "Ask to join"}
+                Join now
               </Button>
               <Button variant="outline" className="h-12 rounded-full text-base">
                 Present
