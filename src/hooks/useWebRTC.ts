@@ -2,8 +2,19 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { getSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { RealtimeChannel } from '@supabase/supabase-js';
 
-const ICE_SERVERS = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+const getIceServers = () => {
+    const servers: RTCIceServer[] = [
+        { urls: 'stun:stun.l.google.com:19302' }
+    ];
+
+    if (process.env.NEXT_PUBLIC_TURN_URL && process.env.NEXT_PUBLIC_TURN_USERNAME && process.env.NEXT_PUBLIC_TURN_PASSWORD) {
+        servers.push({
+            urls: process.env.NEXT_PUBLIC_TURN_URL,
+            username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+            credential: process.env.NEXT_PUBLIC_TURN_PASSWORD,
+        });
+    }
+    return { iceServers: servers };
 };
 
 interface UseWebRTCReturn {
@@ -11,6 +22,7 @@ interface UseWebRTCReturn {
     remoteStream: MediaStream | null;
     sendSubtitle: (text: string) => void;
     startCall: () => void;
+    leaveCall: () => void;
     connectionStatus: string;
     error: string | null;
     isHost: boolean;
@@ -21,7 +33,8 @@ interface UseWebRTCReturn {
 }
 
 export function useWebRTC(
-    onSubtitleReceived: (text: string) => void
+    onSubtitleReceived: (text: string) => void,
+    roomId: string
 ): UseWebRTCReturn {
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -66,11 +79,11 @@ export function useWebRTC(
 
     // 2. Initialize Supabase Realtime & WebRTC
     useEffect(() => {
-        if (!localStream || !myId) return;
+        if (!localStream || !myId || !roomId) return;
 
+        console.log('[useWebRTC] Connecting to room:', roomId);
         const supabase = getSupabaseBrowserClient();
-        const roomName = 'meeting-room-v1'; // TODO: Make dynamic if needed
-        const channel = supabase.channel(roomName, {
+        const channel = supabase.channel(roomId, {
             config: {
                 presence: {
                     key: myId,
@@ -80,7 +93,7 @@ export function useWebRTC(
         channelRef.current = channel;
 
         // Setup PC
-        const pc = new RTCPeerConnection(ICE_SERVERS);
+        const pc = new RTCPeerConnection(getIceServers());
         peerRef.current = pc;
 
         // --- PC Handlers ---
@@ -144,10 +157,10 @@ export function useWebRTC(
             })
             .on('broadcast', { event: 'join-request' }, ({ payload }: { payload: { guestId: string } }) => {
                 // Only Host cares about join requests
-                // We need to use valid ref for isHost because of closure if not careful, 
-                // but here we trust the state update will trigger re-render if needed. 
+                // We need to use valid ref for isHost because of closure if not careful,
+                // but here we trust the state update will trigger re-render if needed.
                 // Actually, inside event listener 'isHost' might be stale.
-                // Presence sync happens first usually. 
+                // Presence sync happens first usually.
                 // Let's rely on the user interface to check `isHost` before showing the request.
                 // But we need to store the request.
                 if (payload.guestId !== myId) {
@@ -157,11 +170,11 @@ export function useWebRTC(
             })
             .on('broadcast', { event: 'approve-guest' }, ({ payload }: { payload: { guestId: string } }) => {
                 if (payload.guestId === myId) {
-                    console.log('[Signaling] Approved by Host!');
+                    console.log('[Signaling] Approved by Host! Waiting for offer...');
                     setGuestStatus('approved');
                     setConnectionStatus('connecting...');
                     // Host initiates the call usually, or Guest can now?
-                    // Let's have the Host initiate the offer upon approval? 
+                    // Let's have the Host initiate the offer upon approval?
                     // Or Guest sends 'ready-for-offer'.
                     // Simpler: Host approves -> Host creates Offer immediately.
                 }
@@ -201,18 +214,18 @@ export function useWebRTC(
             })
             .subscribe(async (status: string) => {
                 if (status === 'SUBSCRIBED') {
-                    console.log('[Signaling] Connected to Supabase channel');
+                    console.log('[Signaling] Connected to Supabase channel:', roomId);
                     setConnectionStatus('connected to signaling');
                     await channel.track({ joined_at: new Date().toISOString() });
                 }
             });
 
         return () => {
-            console.log('[useWebRTC] Cleanup');
+            console.log('[useWebRTC] Cleanup channel:', roomId);
             channel.unsubscribe();
             pc.close();
         };
-    }, [localStream, myId]);
+    }, [localStream, myId, roomId]);
 
 
     const startCall = useCallback(async () => {
@@ -271,11 +284,38 @@ export function useWebRTC(
         }
     }, []);
 
+    const leaveCall = useCallback(() => {
+        console.log('[useWebRTC] Leaving call...');
+
+        // Stop local tracks
+        if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+        }
+
+        // Close Peer Connection
+        if (peerRef.current) {
+            peerRef.current.close();
+        }
+
+        // Unsubscribe from Supabase
+        if (channelRef.current) {
+            channelRef.current.unsubscribe();
+        }
+
+        // Reset state
+        setLocalStream(null);
+        setRemoteStream(null);
+        setConnectionStatus('disconnected');
+        setGuestStatus('idle');
+        setIsHost(false);
+    }, [localStream]);
+
     return {
         localStream,
         remoteStream,
         sendSubtitle,
         startCall,
+        leaveCall,
         connectionStatus,
         error,
         isHost,

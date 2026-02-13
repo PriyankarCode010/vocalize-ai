@@ -4,9 +4,13 @@ import { useASLRecognition, drawLandmarks } from '@/hooks/useASLRecognition';
 import { useSentenceBuilder } from '@/hooks/useSentenceBuilder';
 import { useTTS } from '@/hooks/useTTS';
 import { Button } from '@/components/ui/button';
-import { Mic, MicOff, Video, VideoOff, Volume2, X, Share2, Copy, Check } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Volume2, X, Share2, Copy, Check, PhoneOff } from 'lucide-react';
 
-export default function MeetingRoom() {
+interface MeetingRoomProps {
+  roomId: string;
+}
+
+export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -31,12 +35,13 @@ export default function MeetingRoom() {
     guestStatus,
     guestRequest,
     approveGuest,
-    rejectGuest
+    rejectGuest,
+    leaveCall
   } = useWebRTC((text) => {
     setRemoteSubtitle(text);
     // Optional: Auto-speak remote subtitles?
     // speak(text); 
-  });
+  }, roomId);
 
   const { 
     isInitialized, 
@@ -274,6 +279,20 @@ export default function MeetingRoom() {
          >
             <Volume2 className="h-4 w-4" />
             Speak
+         </Button>
+
+         <div className="w-px h-8 bg-neutral-800 mx-2" />
+
+         <Button 
+            variant="destructive" 
+            className="rounded-full gap-2 px-6"
+            onClick={() => {
+                leaveCall();
+                window.location.href = '/';
+            }}
+         >
+            <PhoneOff className="h-4 w-4" />
+            Leave
          </Button>
       </div>
     </div>
