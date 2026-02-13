@@ -95,7 +95,7 @@ export default function MeetingLandingPage() {
             type="button"
             onClick={handleCreate}
             disabled={creating}
-            className="bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 h-11"
+            className="rounded-full px-5 h-11"
           >
             <Plus className="h-4 w-4 mr-2" />
             {creating ? "Creating..." : "New meeting"}

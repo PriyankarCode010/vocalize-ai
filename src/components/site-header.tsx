@@ -108,7 +108,7 @@ export function SiteHeader() {
     <header className="sticky top-0 z-50 border-b border-border bg-background/90 backdrop-blur supports-backdrop-filter:bg-background/70">
       <div className="container mx-auto flex items-center justify-between px-4 py-4">
         <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight text-lg">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary">S</span>
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary">V</span>
           vocalize-ai
         </Link>
 

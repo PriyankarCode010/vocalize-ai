@@ -169,14 +169,14 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-neutral-950 text-white p-4 relative">
+    <div className="flex flex-col min-h-[calc(100vh-64px)] bg-background text-foreground p-4 relative">
       
       {/* Host Approval Notification */}
       {isHost && guestRequest && (
-          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 bg-neutral-900 border border-neutral-700 p-4 rounded-xl shadow-2xl flex items-center gap-4 animate-in slide-in-from-top-4">
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 bg-card border border-border p-4 rounded-xl shadow-2xl flex items-center gap-4 animate-in slide-in-from-top-4">
               <div className="flex flex-col">
-                  <span className="font-bold text-sm">Guest Requesting to Join</span>
-                  <span className="text-xs text-neutral-400">ID: {guestRequest.slice(0, 8)}...</span>
+                  <span className="font-bold text-sm text-foreground">Guest Requesting to Join</span>
+                  <span className="text-xs text-muted-foreground">ID: {guestRequest.slice(0, 8)}...</span>
               </div>
               <div className="flex gap-2">
                   <Button size="sm" variant="destructive" onClick={() => rejectGuest(guestRequest)}>Deny</Button>
@@ -189,7 +189,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-xl font-bold flex items-center gap-2">
             Vocalize AI Meeting
-            <span className="text-xs bg-neutral-800 px-2 py-0.5 rounded text-neutral-400 font-normal">
+            <span className="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground font-normal">
                 {isHost ? 'Host' : 'Guest'}
             </span>
         </h1>
@@ -197,7 +197,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             <Button 
                 size="sm" 
                 variant="outline" 
-                className="text-black bg-white hover:bg-gray-200 gap-2"
+                className="gap-2"
                 onClick={handleShare}
             >
                 {isCopied ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
@@ -224,7 +224,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 relative">
         
         {/* Local Feed */}
-        <div className="relative bg-neutral-900 rounded-2xl overflow-hidden border border-neutral-800">
+        <div className="relative bg-muted rounded-2xl overflow-hidden border border-border">
           <video 
             ref={localVideoRef} 
             autoPlay 
@@ -241,8 +241,8 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             />
           )}
           
-          <div className="absolute bottom-4 left-4 right-4 bg-black/60 p-3 rounded-lg backdrop-blur-sm">
-            <p className="text-xs text-neutral-400 mb-1">Your Sentence:</p>
+          <div className="absolute bottom-4 left-4 right-4 bg-background/60 p-3 rounded-lg backdrop-blur-sm border border-border/50">
+            <p className="text-xs text-muted-foreground mb-1">Your Sentence:</p>
             <p className="text-lg font-medium min-h-[1.5rem]">{sentenceString || "Start signing..."}</p>
           </div>
 
@@ -252,7 +252,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
         </div>
 
         {/* Remote Feed */}
-        <div className="relative bg-neutral-900 rounded-2xl overflow-hidden border border-neutral-800">
+        <div className="relative bg-muted rounded-2xl overflow-hidden border border-border">
           <video 
               ref={remoteVideoRef} 
               autoPlay 
@@ -261,19 +261,19 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
           />
           
           {!remoteStream && (
-             <div className="flex items-center justify-center h-full text-neutral-500">
+             <div className="flex items-center justify-center h-full text-muted-foreground">
                 {isHost ? "Waiting for guest to join..." : "Connecting to Host..."}
              </div>
           )}
 
           {/* Remote Subtitles */}
           {remoteSubtitle && (
-            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-black/80 px-6 py-3 rounded-full backdrop-blur-md border border-neutral-700">
-               <p className="text-xl font-semibold text-center">{remoteSubtitle}</p>
+            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-popover/80 px-6 py-3 rounded-full backdrop-blur-md border border-border shadow-xl">
+               <p className="text-xl font-semibold text-center text-popover-foreground">{remoteSubtitle}</p>
             </div>
           )}
 
-           <div className="absolute top-4 left-4 bg-black/50 px-2 py-1 rounded text-xs flex items-center gap-2">
+           <div className="absolute top-4 left-4 bg-background/50 px-2 py-1 rounded text-xs flex items-center gap-2 border border-border/30">
              <div className={`w-2 h-2 rounded-full ${remoteStream ? 'bg-green-500' : 'bg-red-500'}`} />
              Remote User
            </div>
@@ -301,11 +301,11 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             {isVideoOff ? <VideoOff /> : <Video />}
          </Button>
 
-         <div className="w-px h-8 bg-neutral-800 mx-2" />
+         <div className="w-px h-8 bg-border mx-2" />
 
          <Button 
             variant="outline" 
-            className="rounded-full gap-2 border-neutral-700 hover:bg-neutral-800 text-white"
+            className="rounded-full gap-2 hover:bg-muted"
             onClick={clearSentence}
          >
             <X className="h-4 w-4" />
@@ -321,7 +321,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             Speak
          </Button>
 
-         <div className="w-px h-8 bg-neutral-800 mx-2" />
+         <div className="w-px h-8 bg-border mx-2" />
 
          <Button 
             variant="destructive" 

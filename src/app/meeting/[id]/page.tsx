@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { Button } from "@/components/ui/button"
@@ -281,13 +282,13 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-6 py-8">
       <div className="grid gap-8 lg:grid-cols-[2fr_1fr] w-full max-w-6xl items-center">
-        <Card className="bg-black text-white overflow-hidden">
+        <Card className="bg-card border-border overflow-hidden">
           <CardContent className="p-0">
             <div className="relative">
               <video ref={videoRef} className="w-full aspect-video object-cover bg-neutral-900" autoPlay playsInline muted />
               {!localStream && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/70">
-                  <p className="text-lg font-semibold">Do you want people to see and hear you in the meeting?</p>
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/80 px-6 text-center">
+                  <p className="text-lg font-semibold text-foreground">Do you want people to see and hear you in the meeting?</p>
                   <Button onClick={requestMedia}>Allow microphone and camera</Button>
                 </div>
               )}
