@@ -25,7 +25,7 @@ export function SiteFooter() {
                 </Link>
               </li>
               <li>
-                <Link href="/call/new" className="hover:text-foreground">
+                <Link href="/meeting/new" className="hover:text-foreground">
                   Virtual call rooms
                 </Link>
               </li>
