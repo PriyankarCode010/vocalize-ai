@@ -32,7 +32,24 @@ export function useSentenceBuilder(): UseSentenceBuilderReturn {
         setSentence([]);
     }, []);
 
-    const sentenceString = sentence.join(' ').replace(/\s\s+/g, ' ').trim();
+    const sentenceString = sentence.reduce((acc, current, index) => {
+        if (index === 0) return current === ' ' ? '' : current;
+        const prev = sentence[index - 1];
+
+        // If current is an explicit space gesture
+        if (current === ' ') return acc.endsWith(' ') ? acc : acc + ' ';
+
+        // If previous was a space, just append
+        if (prev === ' ') return acc + current;
+
+        // If both are single characters (fingerspelling), join without space
+        if (current.length === 1 && prev.length === 1) {
+            return acc + current;
+        }
+
+        // Otherwise, add a space before the new word
+        return acc.endsWith(' ') ? acc + current : acc + ' ' + current;
+    }, '');
 
     return {
         sentence,

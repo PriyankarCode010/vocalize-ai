@@ -225,7 +225,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 relative">
         
         {/* Local Feed */}
-        <div className="relative bg-muted rounded-2xl overflow-hidden border border-border">
+        <div className="relative bg-muted rounded-2xl overflow-hidden border border-border aspect-video w-full shadow-md">
           <video 
             ref={localVideoRef} 
             autoPlay 
@@ -253,7 +253,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
         </div>
 
         {/* Remote Feed */}
-        <div className="relative bg-muted rounded-2xl overflow-hidden border border-border">
+        <div className="relative bg-muted rounded-2xl overflow-hidden border border-border aspect-video w-full shadow-md">
           <video 
               ref={remoteVideoRef} 
               autoPlay 

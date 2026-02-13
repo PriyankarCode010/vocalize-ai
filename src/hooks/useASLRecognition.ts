@@ -133,6 +133,8 @@ export function useASLRecognition({ videoRef, enabled = true }: UseASLRecognitio
         } else {
             setHandDetected(false);
             setLandmarks(null);
+            setCurrentPrediction(null);
+            setRawPrediction(null);
         }
     }, []);
 
