@@ -82,6 +82,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     if (localVideoRef.current && localStream) {
       console.log('[MeetingRoom] 📹 Attaching local stream to video element');
       localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.play().catch(e => console.error('[MeetingRoom] Error playing local video:', e));
     } else {
         console.log('[MeetingRoom] ⚠️ Local video ref or stream missing', { hasRef: !!localVideoRef.current, hasStream: !!localStream });
     }
@@ -230,7 +231,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             autoPlay 
             playsInline 
             muted 
-            className={`w-full h-full object-cover ${isVideoOff ? 'hidden' : ''}`} 
+            className={`absolute inset-0 w-full h-full object-cover ${isVideoOff ? 'hidden' : ''}`} 
           />
           {!isVideoOff && (
             <canvas 
@@ -246,7 +247,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             <p className="text-lg font-medium min-h-[1.5rem]">{sentenceString || "Start signing..."}</p>
           </div>
 
-          <div className="absolute top-4 left-4 bg-black/50 px-2 py-1 rounded text-xs">
+          <div className="absolute top-4 left-4 bg-background/50 px-2 py-1 rounded text-xs border border-border/30 backdrop-blur-sm">
             You {isMuted && '(Muted)'}
           </div>
         </div>
@@ -313,7 +314,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
          </Button>
 
          <Button 
-            className="rounded-full gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+            className="rounded-full gap-2"
             onClick={() => speak(sentenceString)}
             disabled={!sentenceString}
          >
