@@ -236,14 +236,14 @@ export default function HandDetector() {
     }, [onResults]);
 
     return (
-        <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-8">
+        <div className="flex flex-col items-center justify-center min-h-screen bg-background p-8">
             <div className="w-full max-w-4xl">
                 {/* Header */}
                 <div className="text-center mb-8">
-                    <h1 className="text-5xl font-bold text-white mb-4 bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-600">
+                    <h1 className="text-5xl font-bold text-foreground mb-4">
                         ASL Recognition
                     </h1>
-                    <p className="text-gray-300 text-lg">
+                    <p className="text-muted-foreground text-lg">
                         Show your hand to the camera to detect ASL signs
                     </p>
                 </div>
@@ -279,47 +279,47 @@ export default function HandDetector() {
                 {/* Status Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                     {/* Hand Detection Status */}
-                    <div className={`p-6 rounded-xl shadow-lg transition-all duration-300 ${handDetected
-                        ? 'bg-gradient-to-br from-green-500 to-emerald-600'
-                        : 'bg-gradient-to-br from-gray-700 to-gray-800'
+                    <div className={`p-6 rounded-xl border shadow-sm transition-all duration-300 ${handDetected
+                        ? 'bg-green-500/10 border-green-500/50'
+                        : 'bg-card border-border'
                         }`}>
-                        <div className="text-sm font-medium text-white opacity-80 mb-1">
+                        <div className="text-sm font-medium text-muted-foreground mb-1">
                             Hand Status
                         </div>
-                        <div className="text-2xl font-bold text-white">
+                        <div className={`text-2xl font-bold ${handDetected ? 'text-green-500' : 'text-foreground'}`}>
                             {handDetected ? '✓ Detected' : '✗ No Hand'}
                         </div>
                     </div>
 
                     {/* Current Prediction */}
-                    <div className="p-6 rounded-xl shadow-lg bg-gradient-to-br from-purple-500 to-pink-600">
-                        <div className="text-sm font-medium text-white opacity-80 mb-1">
+                    <div className="p-6 rounded-xl border bg-card text-card-foreground shadow-sm">
+                        <div className="text-sm font-medium text-muted-foreground mb-1">
                             Prediction
                         </div>
-                        <div className="text-4xl font-bold text-white">
+                        <div className="text-4xl font-bold text-primary">
                             {currentPrediction || '—'}
                         </div>
                         {rawPrediction && rawPrediction !== currentPrediction && (
-                            <div className="text-xs text-white opacity-60 mt-1">
+                            <div className="text-xs text-muted-foreground mt-1">
                                 Raw: {rawPrediction}
                             </div>
                         )}
                     </div>
 
-                    {/* Confidence Placeholder */}
-                    <div className="p-6 rounded-xl shadow-lg bg-gradient-to-br from-blue-500 to-cyan-600">
-                        <div className="text-sm font-medium text-white opacity-80 mb-1">
-                            Status
+                    {/* System Status */}
+                    <div className="p-6 rounded-xl border bg-card text-card-foreground shadow-sm">
+                        <div className="text-sm font-medium text-muted-foreground mb-1">
+                            System Status
                         </div>
-                        <div className="text-lg font-semibold text-white">
+                        <div className="text-lg font-semibold text-foreground">
                             {isLoading ? (
                                 <span className="flex items-center gap-2">
                                     <span className="animate-spin">⟳</span> Processing...
                                 </span>
                             ) : handDetected ? (
-                                'Ready'
+                                'Ready for Input'
                             ) : (
-                                'Waiting...'
+                                'Waiting for Hand...'
                             )}
                         </div>
                     </div>
@@ -327,35 +327,35 @@ export default function HandDetector() {
 
                 {/* Error Display */}
                 {error && (
-                    <div className="p-4 rounded-xl bg-red-500 bg-opacity-20 border border-red-500 mb-6">
+                    <div className="p-4 rounded-xl bg-destructive/10 border border-destructive mb-6">
                         <div className="flex items-start gap-3">
-                            <span className="text-red-400 text-xl">⚠</span>
+                            <span className="text-destructive text-xl">⚠</span>
                             <div>
-                                <div className="text-red-300 font-semibold mb-1">Error</div>
-                                <div className="text-red-200 text-sm">{error}</div>
+                                <div className="text-destructive font-semibold mb-1">Error</div>
+                                <div className="text-destructive-foreground text-sm">{error}</div>
                             </div>
                         </div>
                     </div>
                 )}
 
                 {/* Instructions */}
-                <div className="bg-slate-800 bg-opacity-50 rounded-xl p-6 backdrop-blur-sm">
-                    <h3 className="text-white font-semibold mb-3 text-lg">Instructions:</h3>
-                    <ul className="text-gray-300 space-y-2">
+                <div className="bg-card rounded-xl p-6 border shadow-sm">
+                    <h3 className="text-foreground font-semibold mb-3 text-lg">Instructions:</h3>
+                    <ul className="text-muted-foreground space-y-2">
                         <li className="flex items-start gap-2">
-                            <span className="text-purple-400">•</span>
+                            <span className="text-primary">•</span>
                             <span>Position your hand clearly in front of the camera</span>
                         </li>
                         <li className="flex items-start gap-2">
-                            <span className="text-purple-400">•</span>
+                            <span className="text-primary">•</span>
                             <span>Ensure good lighting for better detection</span>
                         </li>
                         <li className="flex items-start gap-2">
-                            <span className="text-purple-400">•</span>
+                            <span className="text-primary">•</span>
                             <span>The prediction uses smoothing (last 5 predictions) for stability</span>
                         </li>
                         <li className="flex items-start gap-2">
-                            <span className="text-purple-400">•</span>
+                            <span className="text-primary">•</span>
                             <span>Green lines show detected hand landmarks</span>
                         </li>
                     </ul>
