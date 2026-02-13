@@ -30,6 +30,7 @@ export function useSubtitles(): UseSubtitlesReturn {
     
     const formatted: string[] = [];
     let currentWord = '';
+    let lastCharWasSpace = false;
     
     for (let i = 0; i < words.length; i++) {
       const word = words[i];
@@ -39,10 +40,14 @@ export function useSubtitles(): UseSubtitlesReturn {
           formatted.push(currentWord);
           currentWord = '';
         }
-        formatted.push(' ');
-      } else if (word.length === 1) {
+        if (!lastCharWasSpace) {
+          formatted.push(' ');
+          lastCharWasSpace = true;
+        }
+      } else if (word.length === 1 && word.match(/[A-Za-z]/)) {
         // Single character, likely fingerspelling
         currentWord += word;
+        lastCharWasSpace = false;
       } else {
         // Multi-character word
         if (currentWord) {
@@ -50,6 +55,7 @@ export function useSubtitles(): UseSubtitlesReturn {
           currentWord = '';
         }
         formatted.push(word);
+        lastCharWasSpace = false;
       }
     }
     
@@ -57,7 +63,7 @@ export function useSubtitles(): UseSubtitlesReturn {
       formatted.push(currentWord);
     }
     
-    return formatted.join('').trim();
+    return formatted.join('').replace(/\s+/g, ' ').trim();
   }, []);
 
   // Add local prediction with debouncing
@@ -83,12 +89,25 @@ export function useSubtitles(): UseSubtitlesReturn {
         return newSentence.slice(0, -1);
       }
       
-      // Debounce logic - only add if different from last word or enough time passed
+      // Handle "no sign detected" - add space if last character wasn't space
+      if (prediction === 'no_sign_detected' || prediction === 'no sign found') {
+        if (newSentence.length > 0 && newSentence[newSentence.length - 1] !== ' ') {
+          newSentence.push(' ');
+        }
+        return newSentence;
+      }
+      
+      // Skip empty predictions
+      if (!prediction || !prediction.trim()) {
+        return newSentence;
+      }
+      
+      // Enhanced debouncing logic
       const timeSinceLastWord = now - lastWordTimeRef.current;
       const isDifferentWord = prediction !== lastWordRef.current;
       const shouldAdd = isDifferentWord || timeSinceLastWord > debounceTimeRef.current;
       
-      if (shouldAdd && prediction.trim()) {
+      if (shouldAdd) {
         newSentence.push(prediction);
         lastWordRef.current = prediction;
         lastWordTimeRef.current = now;

@@ -106,11 +106,41 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     if (!isMounted) return;
     
     if (localVideoRef.current && localStream) {
-      console.log('[MeetingRoom] 📹 Attaching local stream to video element');
+      console.log('[MeetingRoom] 📹 Attaching local stream to video element', {
+        streamActive: localStream.active,
+        videoTracks: localStream.getVideoTracks().length,
+        audioTracks: localStream.getAudioTracks().length
+      });
+      
       localVideoRef.current.srcObject = localStream;
-      localVideoRef.current.play().catch(e => console.error('[MeetingRoom] Error playing local video:', e));
+      
+      // Ensure video plays
+      localVideoRef.current.play().then(() => {
+        console.log('[MeetingRoom] ✅ Local video playing successfully');
+      }).catch(e => {
+        console.error('[MeetingRoom] Error playing local video:', e);
+        // Try muted playback first
+        if (localVideoRef.current) {
+          localVideoRef.current.muted = true;
+          localVideoRef.current.play().then(() => {
+            console.log('[MeetingRoom] ✅ Local video playing after muted workaround');
+            // Unmute after successful playback
+            setTimeout(() => {
+              if (localVideoRef.current) {
+                localVideoRef.current.muted = false;
+              }
+            }, 100);
+          }).catch(e2 => {
+            console.error('[MeetingRoom] Still cannot play local video:', e2);
+          });
+        }
+      });
     } else {
-        console.log('[MeetingRoom] ⚠️ Local video ref or stream missing', { hasRef: !!localVideoRef.current, hasStream: !!localStream });
+        console.log('[MeetingRoom] ⚠️ Local video ref or stream missing', { 
+          hasRef: !!localVideoRef.current, 
+          hasStream: !!localStream,
+          streamActive: localStream?.active 
+        });
     }
   }, [localStream, isMounted]);
 
@@ -128,8 +158,13 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 
   // Handle ASL Predictions
   useEffect(() => {
-    if (currentPrediction && isMounted) {
+    if (!isMounted) return;
+    
+    if (currentPrediction) {
       addLocalPrediction(currentPrediction);
+    } else {
+      // No sign detected - add space to separate words
+      addLocalPrediction('no_sign_detected');
     }
   }, [currentPrediction, addLocalPrediction, isMounted]);
 

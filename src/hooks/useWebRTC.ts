@@ -61,13 +61,22 @@ export function useWebRTC(
         console.log('[useWebRTC] Initializing local media...', id);
         const getMedia = async () => {
             try {
+                console.log('[useWebRTC] Requesting media access...');
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { 
                         width: { ideal: 1280 },
-                        height: { ideal: 720 }
+                        height: { ideal: 720 },
+                        facingMode: 'user'
                     }, 
                     audio: true 
                 });
+                
+                console.log('[useWebRTC] Media stream obtained:', {
+                    videoTracks: stream.getVideoTracks().length,
+                    audioTracks: stream.getAudioTracks().length,
+                    active: stream.active
+                });
+                
                 if (mounted) {
                     console.log('[useWebRTC] Local media acquired with tracks:', stream.getTracks().length);
                     setLocalStream(stream);
