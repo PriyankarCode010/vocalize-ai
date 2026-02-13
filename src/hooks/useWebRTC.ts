@@ -233,7 +233,7 @@ export function useWebRTC(
                         channel.send({
                             type: 'broadcast',
                             event: 'signal',
-                            payload: { type: 'answer', sdp: answer.sdp, from: myId }
+                            payload: { type: 'answer', sdp: answer, from: myId }
                         });
                         console.log('[Signaling] Sent Answer');
 
