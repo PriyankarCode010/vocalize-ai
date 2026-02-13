@@ -43,7 +43,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     console.log('[MeetingRoom] 💬 Received remote subtitle:', text);
     setRemoteSubtitle(text);
     // Optional: Auto-speak remote subtitles?
-    // speak(text); 
+    speak(text); 
   }, roomId);
 
   useEffect(() => {
@@ -73,6 +73,8 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     if (remoteVideoRef.current && remoteStream) {
       console.log('[MeetingRoom] 📺 Attaching remote stream to video element');
       remoteVideoRef.current.srcObject = remoteStream;
+      // Explicitly try to play
+      remoteVideoRef.current.play().catch(e => console.error('[MeetingRoom] Error playing remote video:', e));
     } else {
         console.log('[MeetingRoom] ℹ️ Remote video ref or stream missing', { hasRef: !!remoteVideoRef.current, hasStream: !!remoteStream });
     }

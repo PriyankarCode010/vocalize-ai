@@ -129,8 +129,23 @@ export function useWebRTC(
         };
 
         pc.ontrack = (event) => {
-            console.log('[WebRTC] 🎥 Received remote track:', event.streams[0].id);
-            setRemoteStream(event.streams[0]);
+            const stream = event.streams[0];
+            console.log('[WebRTC] 🎥 Received remote track:', event.track.kind, stream?.id);
+            if (stream) {
+                setRemoteStream(stream);
+            } else {
+                console.log('[WebRTC] ⚠️ No stream found in event, creating new one...');
+                // If the track is not associated with a stream, create one
+                // However, we need to be careful not to overwrite valid streams if multiple tracks come in 
+                // but usually simple 1-1 calls have 1 stream.
+                setRemoteStream((prev) => {
+                    if (prev) {
+                        prev.addTrack(event.track);
+                        return prev;
+                    }
+                    return new MediaStream([event.track]);
+                });
+            }
         };
 
         pc.ondatachannel = (event) => {
