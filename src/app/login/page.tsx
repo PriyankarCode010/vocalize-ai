@@ -47,27 +47,37 @@ export default function LoginPage() {
     event.preventDefault()
     setStatus("submitting")
     setMessage(null)
+    
+    console.log('[Login] Form submission:', { email: email.trim(), hasPassword: !!password });
 
     try {
+      console.log('[Login] Sending request to /api/auth/login');
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), password }),
       })
 
-      const data = await response.json().catch(() => ({}))
+      console.log('[Login] Response received:', response.status, response.ok);
+
+      const data = await response.json().catch(() => {
+        console.error('[Login] Failed to parse response JSON');
+        return {}
+      })
 
       if (!response.ok) {
+        console.log('[Login] Login failed:', data.error);
         throw new Error(data.error || "Unable to sign in.")
       }
 
+      console.log('[Login] Login successful, setting status to success');
       setStatus("success")
       const nextDestination = redirectParam || "/demo"
       router.push(nextDestination)
     } catch (error) {
+      console.error('[Login] Login error:', error);
       setStatus("error")
       setMessage(error instanceof Error ? error.message : "Unexpected error.")
-      console.error("[login] email/password login failed", error)
     }
   }
 

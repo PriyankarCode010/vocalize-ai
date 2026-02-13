@@ -71,12 +71,11 @@ export function SiteHeader() {
     }
     const { data, error } = await supabase.from("profiles").select("id, display_name, avatar_url").eq("id", user.id).single()
     const username = data?.display_name || user.user_metadata?.full_name || user.email || "Unknown user"
-    console.log("username", username)
-    console.log("user", user)
-    console.log("[profile-debug]", { profile: data, error })
+    
     if (data) {
       setProfile(data as Profile)
     } else {
+      // Create a basic profile if none exists, don't fail the header
       setProfile({
         id: user.id,
         display_name: username,
