@@ -142,6 +142,15 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     }
   }, [localStream, isMounted]);
 
+  // Ensure track enablement matches UI state (prevents "blank" local tile).
+  useEffect(() => {
+    if (!localStream) return;
+    const videoTracks = localStream.getVideoTracks();
+    videoTracks.forEach((t) => {
+      t.enabled = !isVideoOff;
+    });
+  }, [localStream, isVideoOff]);
+
   // Retry playback after WebRTC connects; some browsers only start rendering frames later.
   useEffect(() => {
     if (!isMounted) return;
@@ -156,6 +165,19 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       vid.oncanplay = () => vid.play().catch(() => {});
     }
   }, [connectionStatus, localStream, isMounted]);
+
+  // Debug: confirm video is enabled when we expect it to be visible.
+  useEffect(() => {
+    if (!localStream) return;
+    console.log('[MeetingRoom] local video state', {
+      isVideoOff,
+      videoTracks: localStream.getVideoTracks().map((t) => ({
+        id: t.id,
+        enabled: t.enabled,
+        readyState: t.readyState
+      }))
+    });
+  }, [localStream, isVideoOff]);
 
   useEffect(() => {
     if (!isMounted) return;
