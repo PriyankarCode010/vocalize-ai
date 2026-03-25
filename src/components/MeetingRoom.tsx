@@ -118,35 +118,63 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       localVideoRef.current.muted = true;
 
       const vid = localVideoRef.current;
-      const startPlay = () => {
-        void vid
+      let retries = 0;
+      const maxRetries = 20; // ~2s window
+
+      const attempt = () => {
+        retries += 1;
+
+        const ready = vid.readyState;
+        const width = vid.videoWidth;
+        const height = vid.videoHeight;
+
+        // If we already have frames, stop retrying.
+        if (ready >= 2 && width > 0 && height > 0) {
+          console.log('[MeetingRoom] ✅ Local video rendering (readyState/videoSize)', {
+            readyState: ready,
+            videoWidth: width,
+            videoHeight: height,
+          });
+          return;
+        }
+
+        // Try to start playback again. Autoplay policies are usually ok because video is muted.
+        vid
           .play()
           .then(() => {
-            console.log('[MeetingRoom] ✅ Local video playing successfully');
+            console.log('[MeetingRoom] ✅ Local video play() resolved', {
+              retry: retries,
+              readyState: vid.readyState,
+              videoWidth: vid.videoWidth,
+              videoHeight: vid.videoHeight,
+            });
           })
           .catch((e) => {
-            console.error('[MeetingRoom] Error playing local video:', e);
+            console.error('[MeetingRoom] Local video play() failed', { retry: retries, error: e });
           });
+
+        if (retries < maxRetries) {
+          window.setTimeout(attempt, 100);
+        } else {
+          console.error('[MeetingRoom] Local video not rendering after retries', {
+            readyState: vid.readyState,
+            videoWidth: vid.videoWidth,
+            videoHeight: vid.videoHeight,
+          });
+        }
       };
 
-      // Wait for metadata before calling play; this prevents "play resolved but no frames"
-      // scenarios where readyState is still 0.
-      if (vid.readyState >= 2) {
-        startPlay();
-      } else {
-        const onReady = () => {
-          vid.removeEventListener('loadedmetadata', onReady);
-          vid.removeEventListener('canplay', onReady);
-          startPlay();
-        };
-        vid.addEventListener('loadedmetadata', onReady);
-        vid.addEventListener('canplay', onReady);
-        // Fallback: if events never fire, attempt once after a short delay.
-        window.setTimeout(() => {
-          if (vid.readyState >= 2) onReady();
-          else startPlay();
-        }, 1500);
-      }
+      // Kick off immediately and also on metadata events.
+      attempt();
+      const onMeta = () => attempt();
+      vid.addEventListener('loadedmetadata', onMeta);
+      vid.addEventListener('canplay', onMeta);
+
+      // Cleanup listeners when stream changes/unmounts.
+      return () => {
+        vid.removeEventListener('loadedmetadata', onMeta);
+        vid.removeEventListener('canplay', onMeta);
+      };
     } else {
         console.log('[MeetingRoom] ⚠️ Local video ref or stream missing', { 
           hasRef: !!localVideoRef.current, 
