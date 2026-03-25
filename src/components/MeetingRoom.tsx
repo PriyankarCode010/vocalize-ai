@@ -110,26 +110,29 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       
       localVideoRef.current.srcObject = localStream;
       
-      // Ensure video plays
-      localVideoRef.current.play().then(() => {
-        console.log('[MeetingRoom] ✅ Local video playing successfully');
-      }).catch(e => {
-        console.error('[MeetingRoom] Error playing local video:', e);
-        // Try muted playback first
-        if (localVideoRef.current) {
-          localVideoRef.current.muted = true;
-          localVideoRef.current.play().then(() => {
-            // Unmute after successful playback
-            setTimeout(() => {
-              if (localVideoRef.current) {
-                localVideoRef.current.muted = false;
-              }
-            }, 100);
-          }).catch(e2 => {
-            console.error('[MeetingRoom] Still cannot play local video:', e2);
+      // Keep muted=true to avoid autoplay policy issues; muted does not prevent rendering frames.
+      localVideoRef.current.muted = true;
+
+      const vid = localVideoRef.current;
+      const tryPlay = () => {
+        void vid
+          .play()
+          .then(() => {
+            console.log('[MeetingRoom] ✅ Local video playing successfully');
+          })
+          .catch((e) => {
+            console.error('[MeetingRoom] Error playing local video:', e);
           });
-        }
-      });
+      };
+
+      // Play can be called before the stream is fully ready; wait for metadata if needed.
+      if (vid.readyState >= 2) {
+        tryPlay();
+      } else {
+        vid.onloadedmetadata = tryPlay;
+        vid.oncanplay = tryPlay;
+        tryPlay();
+      }
     } else {
         console.log('[MeetingRoom] ⚠️ Local video ref or stream missing', { 
           hasRef: !!localVideoRef.current, 
@@ -138,6 +141,21 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
         });
     }
   }, [localStream, isMounted]);
+
+  // Retry playback after WebRTC connects; some browsers only start rendering frames later.
+  useEffect(() => {
+    if (!isMounted) return;
+    if (!connectionStatus.includes('connected')) return;
+    if (!localVideoRef.current || !localStream) return;
+
+    const vid = localVideoRef.current;
+    vid.muted = true;
+    if (vid.readyState >= 2) {
+      vid.play().catch(() => {});
+    } else {
+      vid.oncanplay = () => vid.play().catch(() => {});
+    }
+  }, [connectionStatus, localStream, isMounted]);
 
   useEffect(() => {
     if (!isMounted) return;
