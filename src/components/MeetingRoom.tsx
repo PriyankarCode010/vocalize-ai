@@ -143,8 +143,17 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     if (!isMounted) return;
     
     if (remoteVideoRef.current && remoteStream) {
+      console.log('[MeetingRoom] 📹 Attaching remote stream to video element', {
+        streamActive: remoteStream.active,
+        videoTracks: remoteStream.getVideoTracks().length,
+        audioTracks: remoteStream.getAudioTracks().length
+      });
       remoteVideoRef.current.srcObject = remoteStream;
-      remoteVideoRef.current.play().catch(e => console.error('[MeetingRoom] Error playing remote video:', e));
+      // Many browsers block autoplay for unmuted videos; muting guarantees frames render.
+      remoteVideoRef.current.muted = true;
+      remoteVideoRef.current.play().then(() => {
+        console.log('[MeetingRoom] ✅ Remote video playing successfully');
+      }).catch(e => console.error('[MeetingRoom] Error playing remote video:', e));
     }
   }, [remoteStream, isMounted]);
 
@@ -319,6 +328,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
               ref={remoteVideoRef} 
               autoPlay 
               playsInline 
+              muted
               className={`w-full h-full object-cover ${!remoteStream ? 'hidden' : ''}`} 
           />
           
