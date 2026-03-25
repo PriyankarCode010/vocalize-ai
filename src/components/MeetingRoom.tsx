@@ -169,14 +169,28 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   // Debug: confirm video is enabled when we expect it to be visible.
   useEffect(() => {
     if (!localStream) return;
-    console.log('[MeetingRoom] local video state', {
+    const vidEl = localVideoRef.current;
+    const payload = {
       isVideoOff,
-      videoTracks: localStream.getVideoTracks().map((t) => ({
-        id: t.id,
-        enabled: t.enabled,
-        readyState: t.readyState
-      }))
-    });
+      videoElement: vidEl
+        ? {
+            readyState: vidEl.readyState,
+            videoWidth: vidEl.videoWidth,
+            videoHeight: vidEl.videoHeight,
+            hasSrcObject: !!vidEl.srcObject,
+          }
+        : null,
+      localStream: {
+        active: localStream.active,
+        videoTracks: localStream.getVideoTracks().map((t) => ({
+          id: t.id,
+          enabled: t.enabled,
+          muted: (t as unknown as { muted?: boolean }).muted ?? undefined,
+          readyState: t.readyState,
+        })),
+      },
+    };
+    console.log('[MeetingRoom] local video state', JSON.stringify(payload));
   }, [localStream, isVideoOff]);
 
   useEffect(() => {
