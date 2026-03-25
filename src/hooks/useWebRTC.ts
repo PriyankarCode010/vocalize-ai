@@ -47,6 +47,7 @@ export function useWebRTC(
     const [guestStatus, setGuestStatus] = useState<'idle' | 'waiting' | 'approved' | 'rejected'>('idle');
     const [guestRequest, setGuestRequest] = useState<string | null>(null);
     const [myId, setMyId] = useState<string>('');
+    const [meetingHostId, setMeetingHostId] = useState<string | null>(null);
 
     const channelRef = useRef<RealtimeChannel | null>(null);
     const peerRef = useRef<RTCPeerConnection | null>(null);
@@ -55,11 +56,41 @@ export function useWebRTC(
     const startCallRequestedRef = useRef(false);
     const restartingMediaRef = useRef(false);
 
+    // 0. Resolve stable identity + meeting host (Once per room)
+    useEffect(() => {
+        let mounted = true;
+        const supabase = getSupabaseBrowserClient();
+
+        const initIdentity = async () => {
+            try {
+                const { data } = await supabase.auth.getUser();
+                const authId = data?.user?.id ?? null;
+                const stableId = authId || crypto.randomUUID();
+                if (mounted) setMyId(stableId);
+            } catch (e) {
+                if (mounted) setMyId(crypto.randomUUID());
+            }
+
+            try {
+                if (!roomId) return;
+                const { data, error } = await supabase.from('meetings').select('host_id').eq('id', roomId).single();
+                if (!error && data?.host_id && mounted) {
+                    setMeetingHostId(data.host_id as string);
+                }
+            } catch {
+                // ignore
+            }
+        };
+
+        void initIdentity();
+        return () => {
+            mounted = false;
+        };
+    }, [roomId]);
+
     // 1. Initialize Local Media (Once)
     useEffect(() => {
         let mounted = true;
-        const id = crypto.randomUUID();
-        setMyId(id);
 
         const getMedia = async (simple: boolean) => {
             try {
@@ -240,29 +271,16 @@ export function useWebRTC(
         // --- Channel Handlers ---
         channel
             .on('presence', { event: 'sync' }, () => {
-                const state = channel.presenceState();
-                const users = Object.keys(state).map(key => {
-                    const presence = state[key][0] as unknown as { at?: string; joined_at?: string };
-                    const ts = presence.at || presence.joined_at;
-                    return {
-                        id: key,
-                        joinedAt: ts ? new Date(ts).getTime() : 0
-                    };
-                }).sort((a, b) => a.joinedAt - b.joinedAt);
+                const amIHost = Boolean(meetingHostId && meetingHostId === myId);
+                setIsHost(amIHost);
 
-                if (users.length > 0) {
-                    const hostId = users[0].id;
-                    const amIHost = hostId === myId;
-                    setIsHost(amIHost);
-
-                    if (!amIHost && guestStatus === 'idle') {
-                        setGuestStatus('waiting');
-                        channel.send({
-                            type: 'broadcast',
-                            event: 'join-request',
-                            payload: { guestId: myId }
-                        });
-                    }
+                if (!amIHost && guestStatus === 'idle') {
+                    setGuestStatus('waiting');
+                    channel.send({
+                        type: 'broadcast',
+                        event: 'join-request',
+                        payload: { guestId: myId }
+                    });
                 }
             })
             .on('broadcast', { event: 'join-request' }, ({ payload }: { payload: { guestId: string } }) => {
@@ -380,7 +398,7 @@ export function useWebRTC(
             channel.unsubscribe();
             pc.close();
         };
-    }, [localStream, myId, roomId]);
+    }, [localStream, myId, roomId, meetingHostId]);
 
 
     const startCall = useCallback(async () => {
