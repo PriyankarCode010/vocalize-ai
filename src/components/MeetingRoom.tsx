@@ -14,18 +14,29 @@ interface MeetingRoomProps {
 
 function attachStream(
   videoEl: HTMLVideoElement | null,
-  stream: MediaStream | null
+  stream: MediaStream | null,
+  isLocal: boolean = false
 ) {
   if (!videoEl || !stream) return;
+  try {
+    videoEl.srcObject = null;
+    videoEl.srcObject = stream;
 
-  videoEl.srcObject = stream;
-  videoEl.muted = true;
-  videoEl.playsInline = true;
-  videoEl.autoplay = true;
+    videoEl.autoplay = true;
+    videoEl.playsInline = true;
 
-  videoEl.onloadedmetadata = () => {
-    videoEl.play().catch(() => {});
-  };
+    if (isLocal) videoEl.muted = true;
+
+    videoEl.onloadedmetadata = () => {
+      videoEl.play().catch(() => {});
+    };
+
+    setTimeout(() => {
+      videoEl.play().catch(() => {});
+    }, 500);
+  } catch (err) {
+    console.error("Attach stream error:", err);
+  }
 }
 
 export default function MeetingRoom({ roomId }: MeetingRoomProps) {
@@ -56,6 +67,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     sendSubtitle, 
     startCall, 
     restartLocalMedia,
+    replaceLocalStream,
     connectionStatus,
     error: rtcError,
     isHost,
@@ -114,7 +126,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     enabled: !isVideoOff && isMounted 
   });
 
-  // Always ensure local video track is enabled (default preview behavior).
+  // Ensure local video tracks are enabled.
   useEffect(() => {
     if (!localStream) return;
     localStream.getVideoTracks().forEach((track) => {
@@ -122,42 +134,55 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     });
   }, [localStream]);
 
-  // Bind streams to video elements.
+  // Bind local video.
   useEffect(() => {
     if (localVideoRef.current && localStream) {
-      attachStream(localVideoRef.current, localStream);
+      attachStream(localVideoRef.current, localStream, true);
     }
   }, [localStream]);
 
+  // Bind remote video.
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
-      attachStream(remoteVideoRef.current, remoteStream);
+      attachStream(remoteVideoRef.current, remoteStream, false);
     }
   }, [remoteStream]);
 
-  const attemptedRestartRef = useRef(false);
-
   const restartCamera = React.useCallback(async () => {
-    // Hook already reacquires { video: true, audio: true } and replaces tracks.
-    await restartLocalMedia();
-  }, [restartLocalMedia]);
+    try {
+      // Prevent overlapping camera restarts (black-screen interval).
+      if ((restartCamera as unknown as { _running?: boolean })._running) return;
+      (restartCamera as unknown as { _running?: boolean })._running = true;
 
-  // Restart local camera if the local preview is black.
+      localStream?.getTracks().forEach((t) => t.stop());
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+      newStream.getVideoTracks().forEach((track) => {
+        track.enabled = true;
+      });
+      await replaceLocalStream(newStream);
+    } catch (err) {
+      console.error("Camera restart failed:", err);
+    } finally {
+      (restartCamera as unknown as { _running?: boolean })._running = false;
+    }
+  }, [localStream, replaceLocalStream]);
+
+  // Black screen detection.
   useEffect(() => {
-    if (!isMounted) return;
-    attemptedRestartRef.current = false;
-
-    const t = window.setTimeout(() => {
-      const video = localVideoRef.current;
-      if (video && video.videoWidth === 0 && !attemptedRestartRef.current) {
-        attemptedRestartRef.current = true;
-        console.warn('Video not rendering, restarting camera...');
+    if (!localVideoRef.current) return;
+    const video = localVideoRef.current;
+    const check = window.setInterval(() => {
+      if (video.videoWidth === 0 && localStream) {
+        console.warn("Black video detected → restarting camera");
         void restartCamera();
       }
-    }, 3000);
+    }, 2000);
 
-    return () => window.clearTimeout(t);
-  }, [localStream, isMounted, restartCamera]);
+    return () => window.clearInterval(check);
+  }, [localStream, restartCamera]);
 
   // Cleanup streams on unmount.
   useEffect(() => {

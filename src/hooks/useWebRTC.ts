@@ -23,6 +23,7 @@ interface UseWebRTCReturn {
     sendSubtitle: (text: string) => void;
     startCall: () => void;
     restartLocalMedia: () => Promise<void>;
+    replaceLocalStream: (stream: MediaStream) => Promise<void>;
     leaveCall: () => void;
     connectionStatus: string;
     error: string | null;
@@ -57,6 +58,11 @@ export function useWebRTC(
     const iceCandidateQueue = useRef<RTCIceCandidateInit[]>([]);
     const startCallRequestedRef = useRef(false);
     const restartingMediaRef = useRef(false);
+
+    // Host identity is derived strictly from the room table (no presence ordering).
+    useEffect(() => {
+        setIsHost(Boolean(meetingHostId && meetingHostId === myId));
+    }, [meetingHostId, myId]);
 
     // 0. Resolve stable identity + meeting host (Once per room)
     useEffect(() => {
@@ -128,6 +134,50 @@ export function useWebRTC(
         localStreamRef.current = localStream;
     }, [localStream]);
 
+    const replaceLocalStream = useCallback(async (stream: MediaStream) => {
+        const pc = peerRef.current;
+        const old = localStreamRef.current;
+
+        // Swap tracks into existing PeerConnection if present.
+        if (pc) {
+            const senders = pc.getSenders();
+            const newVideo = stream.getVideoTracks()[0] ?? null;
+            const newAudio = stream.getAudioTracks()[0] ?? null;
+
+            for (const sender of senders) {
+                const kind = sender.track?.kind;
+                if (kind === 'video' && newVideo && newVideo.readyState === 'live') {
+                    await sender.replaceTrack(newVideo);
+                } else if (kind === 'audio' && newAudio && newAudio.readyState === 'live') {
+                    await sender.replaceTrack(newAudio);
+                }
+            }
+
+            // If sender missing (edge), add only live tracks.
+            if (
+                newVideo &&
+                newVideo.readyState === 'live' &&
+                !senders.some((s) => s.track?.kind === 'video')
+            ) {
+                pc.addTrack(newVideo, stream);
+            }
+            if (
+                newAudio &&
+                newAudio.readyState === 'live' &&
+                !senders.some((s) => s.track?.kind === 'audio')
+            ) {
+                pc.addTrack(newAudio, stream);
+            }
+        }
+
+        // Stop old tracks after swap.
+        if (old) old.getTracks().forEach((t) => t.stop());
+
+        setLocalStream(stream);
+        setMediaReady(true);
+        console.log('[useWebRTC] replaceLocalStream: local tracks replaced');
+    }, []);
+
     const restartLocalMedia = useCallback(async () => {
         if (restartingMediaRef.current) return;
         restartingMediaRef.current = true;
@@ -136,45 +186,14 @@ export function useWebRTC(
             newStream.getVideoTracks().forEach((track) => {
                 track.enabled = true;
             });
-
-            // Swap tracks into existing PeerConnection if present.
-            const pc = peerRef.current;
-            const old = localStream;
-
-            if (pc) {
-                const senders = pc.getSenders();
-                const newVideo = newStream.getVideoTracks()[0] ?? null;
-                const newAudio = newStream.getAudioTracks()[0] ?? null;
-
-                for (const sender of senders) {
-                    const kind = sender.track?.kind;
-                    if (kind === 'video' && newVideo) {
-                        await sender.replaceTrack(newVideo);
-                    } else if (kind === 'audio' && newAudio) {
-                        await sender.replaceTrack(newAudio);
-                    }
-                }
-
-                // If sender missing (edge), add tracks.
-                if (newVideo && !senders.some(s => s.track?.kind === 'video')) {
-                    pc.addTrack(newVideo, newStream);
-                }
-                if (newAudio && !senders.some(s => s.track?.kind === 'audio')) {
-                    pc.addTrack(newAudio, newStream);
-                }
-            }
-
-            // Stop old tracks after swap.
-            if (old) old.getTracks().forEach(t => t.stop());
-            setLocalStream(newStream);
-            console.log('[useWebRTC] restartLocalMedia: replaced local tracks');
+            await replaceLocalStream(newStream);
         } catch (e) {
             console.error('[useWebRTC] restartLocalMedia failed', e);
             setError('Failed to restart camera/microphone');
         } finally {
             restartingMediaRef.current = false;
         }
-    }, [localStream]);
+    }, [replaceLocalStream]);
 
     // 2. Initialize Supabase Realtime & WebRTC
     useEffect(() => {
@@ -273,16 +292,17 @@ export function useWebRTC(
             receiveChannel.onmessage = (e) => onSubtitleReceived(e.data);
         };
 
-        // Add Tracks
-        stream.getTracks().forEach(track => {
-            pc.addTrack(track, stream);
+        // Add only live tracks to the peer connection.
+        stream.getTracks().forEach((track) => {
+            if (track.readyState === 'live') {
+                pc.addTrack(track, stream);
+            }
         });
 
         // --- Channel Handlers ---
         channel
             .on('presence', { event: 'sync' }, () => {
                 const amIHost = Boolean(meetingHostId && meetingHostId === myId);
-                setIsHost(amIHost);
 
                 if (!amIHost && guestStatus === 'idle') {
                     setGuestStatus('waiting');
@@ -365,7 +385,7 @@ export function useWebRTC(
 
                     } else if (p.type === 'answer') {
                         if (!p.sdp) return;
-                        if (pc.remoteDescription) {
+                if (pc.remoteDescription) {
                             console.log('[useWebRTC] ignoring duplicate answer (remoteDescription already set)');
                             return;
                         }
@@ -513,6 +533,7 @@ export function useWebRTC(
         sendSubtitle,
         startCall,
         restartLocalMedia,
+        replaceLocalStream,
         leaveCall,
         connectionStatus,
         error,
