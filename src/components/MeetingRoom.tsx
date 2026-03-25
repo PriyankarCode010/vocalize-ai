@@ -14,26 +14,23 @@ interface MeetingRoomProps {
 
 function attachStream(
   videoEl: HTMLVideoElement | null,
-  stream: MediaStream | null,
-  isLocal: boolean = false
+  stream: MediaStream | null
 ) {
   if (!videoEl || !stream) return;
   try {
-    videoEl.srcObject = null;
     videoEl.srcObject = stream;
 
+    videoEl.muted = true;
     videoEl.autoplay = true;
     videoEl.playsInline = true;
 
-    if (isLocal) videoEl.muted = true;
+    const playPromise = videoEl.play();
 
-    videoEl.onloadedmetadata = () => {
-      videoEl.play().catch(() => {});
-    };
-
-    setTimeout(() => {
-      videoEl.play().catch(() => {});
-    }, 500);
+    if (playPromise !== undefined) {
+      playPromise.catch(() => {
+        setTimeout(() => videoEl.play().catch(() => {}), 500);
+      });
+    }
   } catch (err) {
     console.error("Attach stream error:", err);
   }
@@ -137,14 +134,25 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   // Bind local video.
   useEffect(() => {
     if (localVideoRef.current && localStream) {
-      attachStream(localVideoRef.current, localStream, true);
+      attachStream(localVideoRef.current, localStream);
     }
+  }, [localStream]);
+
+  // Mobile autoplay fix: kick local video play() on first user touch.
+  useEffect(() => {
+    const onTouchStart = () => {
+      const video = localVideoRef.current;
+      if (video) video.play().catch(() => {});
+    };
+
+    document.addEventListener("touchstart", onTouchStart, { once: true });
+    return () => document.removeEventListener("touchstart", onTouchStart);
   }, [localStream]);
 
   // Bind remote video.
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
-      attachStream(remoteVideoRef.current, remoteStream, false);
+      attachStream(remoteVideoRef.current, remoteStream);
     }
   }, [remoteStream]);
 
@@ -331,6 +339,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
         {/* Local Feed */}
         <div className="relative bg-muted rounded-2xl overflow-hidden border border-border aspect-video w-full shadow-md">
           <video 
+            key={localStream?.id}
             ref={localVideoRef} 
             autoPlay 
             playsInline 

@@ -100,7 +100,7 @@ export function useWebRTC(
     useEffect(() => {
         let mounted = true;
 
-        const getMedia = async () => {
+        const startCamera = async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: true,
@@ -123,7 +123,7 @@ export function useWebRTC(
                 setError('Failed to access camera/microphone');
             }
         };
-        void getMedia();
+        void startCamera();
         return () => { 
             mounted = false;
         };
