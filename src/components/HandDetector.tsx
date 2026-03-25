@@ -168,11 +168,8 @@ export default function HandDetector() {
 
                 // Get webcam stream using getUserMedia
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        width: 640,
-                        height: 480,
-                        facingMode: 'user'
-                    }
+                    video: true,
+                    audio: true,
                 });
 
                 streamRef.current = stream;

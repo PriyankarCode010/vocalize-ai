@@ -59,11 +59,8 @@ export default function Yolo11CameraDemo() {
       setIsCameraLoading(true)
       setCameraError(null)
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
+        video: true,
+        audio: true,
       })
       cameraStreamRef.current = stream
       const video = videoRef.current

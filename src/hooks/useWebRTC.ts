@@ -38,6 +38,8 @@ export function useWebRTC(
     roomId: string
 ): UseWebRTCReturn {
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+    const localStreamRef = useRef<MediaStream | null>(null);
+    const [mediaReady, setMediaReady] = useState(false);
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
     const [connectionStatus, setConnectionStatus] = useState<string>('disconnected');
     const [error, setError] = useState<string | null>(null);
@@ -92,23 +94,21 @@ export function useWebRTC(
     useEffect(() => {
         let mounted = true;
 
-        const getMedia = async (simple: boolean) => {
+        const getMedia = async () => {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia(
-                    simple
-                        ? { video: true, audio: true }
-                        : {
-                              video: {
-                                  width: { ideal: 1280 },
-                                  height: { ideal: 720 },
-                                  facingMode: 'user'
-                              },
-                              audio: true
-                          }
-                );
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: true
+                });
+
+                // Ensure preview is not "disabled" by default.
+                stream.getVideoTracks().forEach((track) => {
+                    track.enabled = true;
+                });
                 
                 if (mounted) {
                     setLocalStream(stream);
+                    setMediaReady(true);
                 } else {
                     stream.getTracks().forEach(t => t.stop());
                 }
@@ -117,17 +117,25 @@ export function useWebRTC(
                 setError('Failed to access camera/microphone');
             }
         };
-        void getMedia(false);
+        void getMedia();
         return () => { 
             mounted = false;
         };
     }, []);
+
+    // Keep ref in sync for effects that shouldn't rerun on localStream replacement.
+    useEffect(() => {
+        localStreamRef.current = localStream;
+    }, [localStream]);
 
     const restartLocalMedia = useCallback(async () => {
         if (restartingMediaRef.current) return;
         restartingMediaRef.current = true;
         try {
             const newStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            newStream.getVideoTracks().forEach((track) => {
+                track.enabled = true;
+            });
 
             // Swap tracks into existing PeerConnection if present.
             const pc = peerRef.current;
@@ -170,7 +178,9 @@ export function useWebRTC(
 
     // 2. Initialize Supabase Realtime & WebRTC
     useEffect(() => {
-        if (!localStream || !myId || !roomId) return;
+        if (!mediaReady || !myId || !roomId) return;
+        const stream = localStreamRef.current;
+        if (!stream) return;
 
         const supabase = getSupabaseBrowserClient();
         const channel = supabase.channel(roomId, {
@@ -264,8 +274,8 @@ export function useWebRTC(
         };
 
         // Add Tracks
-        localStream.getTracks().forEach(track => {
-            pc.addTrack(track, localStream);
+        stream.getTracks().forEach(track => {
+            pc.addTrack(track, stream);
         });
 
         // --- Channel Handlers ---
@@ -398,7 +408,7 @@ export function useWebRTC(
             channel.unsubscribe();
             pc.close();
         };
-    }, [localStream, myId, roomId, meetingHostId]);
+    }, [mediaReady, myId, roomId, meetingHostId]);
 
 
     const startCall = useCallback(async () => {
@@ -489,6 +499,7 @@ export function useWebRTC(
 
         // Reset state
         setLocalStream(null);
+        setMediaReady(false);
         setRemoteStream(null);
         setConnectionStatus('disconnected');
         setGuestStatus('idle');

@@ -12,6 +12,22 @@ interface MeetingRoomProps {
   roomId: string;
 }
 
+function attachStream(
+  videoEl: HTMLVideoElement | null,
+  stream: MediaStream | null
+) {
+  if (!videoEl || !stream) return;
+
+  videoEl.srcObject = stream;
+  videoEl.muted = true;
+  videoEl.playsInline = true;
+  videoEl.autoplay = true;
+
+  videoEl.onloadedmetadata = () => {
+    videoEl.play().catch(() => {});
+  };
+}
+
 export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -80,8 +96,6 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     }
   }, roomId);
 
-  const attemptedRestartRef = useRef(false);
-
   // Handle client-side mounting to prevent hydration errors
   useEffect(() => {
     setIsMounted(true);
@@ -100,166 +114,57 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     enabled: !isVideoOff && isMounted 
   });
 
-  // Attach streams to video elements (only after mount)
-  useEffect(() => {
-    if (!isMounted) return;
-    
-    if (localVideoRef.current && localStream) {
-      console.log('[MeetingRoom] 📹 Attaching local stream to video element', {
-        streamActive: localStream.active,
-        videoTracks: localStream.getVideoTracks().length,
-        audioTracks: localStream.getAudioTracks().length
-      });
-      
-      localVideoRef.current.srcObject = localStream;
-      // Ensure the element re-evaluates the new stream.
-      if (typeof localVideoRef.current.load === 'function') {
-        localVideoRef.current.load();
-      }
-      
-      // Keep muted=true to avoid autoplay policy issues; muted does not prevent rendering frames.
-      localVideoRef.current.muted = true;
-
-      const vid = localVideoRef.current;
-      let retries = 0;
-      const maxRetries = 20; // ~2s window
-
-      const attempt = () => {
-        retries += 1;
-
-        const ready = vid.readyState;
-        const width = vid.videoWidth;
-        const height = vid.videoHeight;
-
-        // If we already have frames, stop retrying.
-        if (ready >= 2 && width > 0 && height > 0) {
-          console.log('[MeetingRoom] ✅ Local video rendering (readyState/videoSize)', {
-            readyState: ready,
-            videoWidth: width,
-            videoHeight: height,
-          });
-          return;
-        }
-
-        // Try to start playback again. Autoplay policies are usually ok because video is muted.
-        vid
-          .play()
-          .then(() => {
-            console.log('[MeetingRoom] ✅ Local video play() resolved', {
-              retry: retries,
-              readyState: vid.readyState,
-              videoWidth: vid.videoWidth,
-              videoHeight: vid.videoHeight,
-            });
-          })
-          .catch((e) => {
-            console.error('[MeetingRoom] Local video play() failed', { retry: retries, error: e });
-          });
-
-        if (retries < maxRetries) {
-          window.setTimeout(attempt, 100);
-        } else {
-          console.error('[MeetingRoom] Local video not rendering after retries', {
-            readyState: vid.readyState,
-            videoWidth: vid.videoWidth,
-            videoHeight: vid.videoHeight,
-          });
-          if (!attemptedRestartRef.current) {
-            attemptedRestartRef.current = true;
-            console.warn('[MeetingRoom] Restarting local media as fallback');
-            void restartLocalMedia();
-          }
-        }
-      };
-
-      // Kick off immediately and also on metadata events.
-      attempt();
-      const onMeta = () => attempt();
-      vid.addEventListener('loadedmetadata', onMeta);
-      vid.addEventListener('canplay', onMeta);
-
-      // Cleanup listeners when stream changes/unmounts.
-      return () => {
-        vid.removeEventListener('loadedmetadata', onMeta);
-        vid.removeEventListener('canplay', onMeta);
-      };
-    } else {
-        console.log('[MeetingRoom] ⚠️ Local video ref or stream missing', { 
-          hasRef: !!localVideoRef.current, 
-          hasStream: !!localStream,
-          streamActive: localStream?.active 
-        });
-    }
-  }, [localStream, isMounted]);
-
-  // Ensure track enablement matches UI state (prevents "blank" local tile).
+  // Always ensure local video track is enabled (default preview behavior).
   useEffect(() => {
     if (!localStream) return;
-    const videoTracks = localStream.getVideoTracks();
-    videoTracks.forEach((t) => {
-      t.enabled = !isVideoOff;
+    localStream.getVideoTracks().forEach((track) => {
+      track.enabled = true;
     });
-  }, [localStream, isVideoOff]);
+  }, [localStream]);
 
-  // Retry playback after WebRTC connects; some browsers only start rendering frames later.
+  // Bind streams to video elements.
   useEffect(() => {
-    if (!isMounted) return;
-    if (!connectionStatus.includes('connected')) return;
-    if (!localVideoRef.current || !localStream) return;
-
-    const vid = localVideoRef.current;
-    vid.muted = true;
-    if (vid.readyState >= 2) {
-      vid.play().catch(() => {});
-    } else {
-      vid.oncanplay = () => vid.play().catch(() => {});
+    if (localVideoRef.current && localStream) {
+      attachStream(localVideoRef.current, localStream);
     }
-  }, [connectionStatus, localStream, isMounted]);
-
-  // Debug: confirm video is enabled when we expect it to be visible.
-  useEffect(() => {
-    if (!localStream) return;
-    const vidEl = localVideoRef.current;
-    const payload = {
-      isVideoOff,
-      videoElement: vidEl
-        ? {
-            readyState: vidEl.readyState,
-            videoWidth: vidEl.videoWidth,
-            videoHeight: vidEl.videoHeight,
-            hasSrcObject: !!vidEl.srcObject,
-          }
-        : null,
-      localStream: {
-        active: localStream.active,
-        videoTracks: localStream.getVideoTracks().map((t) => ({
-          id: t.id,
-          enabled: t.enabled,
-          muted: (t as unknown as { muted?: boolean }).muted ?? undefined,
-          readyState: t.readyState,
-        })),
-      },
-    };
-    console.log('[MeetingRoom] local video state', JSON.stringify(payload));
-  }, [localStream, isVideoOff]);
+  }, [localStream]);
 
   useEffect(() => {
-    if (!isMounted) return;
-    
     if (remoteVideoRef.current && remoteStream) {
-      console.log('[MeetingRoom] 📹 Attaching remote stream to video element', {
-        streamActive: remoteStream.active,
-        videoTracks: remoteStream.getVideoTracks().length,
-        audioTracks: remoteStream.getAudioTracks().length
-      });
-      remoteVideoRef.current.srcObject = remoteStream;
-      // Many browsers block autoplay for unmuted videos; muting guarantees frames render.
-      remoteVideoRef.current.muted = true;
-      remoteVideoRef.current.play().then(() => {
-        console.log('[MeetingRoom] ✅ Remote video playing successfully');
-      }).catch(e => console.error('[MeetingRoom] Error playing remote video:', e));
+      attachStream(remoteVideoRef.current, remoteStream);
     }
-  }, [remoteStream, isMounted]);
+  }, [remoteStream]);
+
+  const attemptedRestartRef = useRef(false);
+
+  const restartCamera = React.useCallback(async () => {
+    // Hook already reacquires { video: true, audio: true } and replaces tracks.
+    await restartLocalMedia();
+  }, [restartLocalMedia]);
+
+  // Restart local camera if the local preview is black.
+  useEffect(() => {
+    if (!isMounted) return;
+    attemptedRestartRef.current = false;
+
+    const t = window.setTimeout(() => {
+      const video = localVideoRef.current;
+      if (video && video.videoWidth === 0 && !attemptedRestartRef.current) {
+        attemptedRestartRef.current = true;
+        console.warn('Video not rendering, restarting camera...');
+        void restartCamera();
+      }
+    }, 3000);
+
+    return () => window.clearTimeout(t);
+  }, [localStream, isMounted, restartCamera]);
+
+  // Cleanup streams on unmount.
+  useEffect(() => {
+    return () => {
+      localStream?.getTracks().forEach((track) => track.stop());
+    };
+  }, [localStream]);
 
   // Handle ASL Predictions
   useEffect(() => {

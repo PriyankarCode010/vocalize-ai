@@ -88,11 +88,8 @@ export default function HandSignRecognition() {
     try {
       setIsCameraLoading(true)
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
+        video: true,
+        audio: true,
       })
       cameraStreamRef.current = stream
       setCameraStream(stream)
