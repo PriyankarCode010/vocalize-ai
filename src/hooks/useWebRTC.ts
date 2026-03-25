@@ -51,6 +51,7 @@ export function useWebRTC(
     const peerRef = useRef<RTCPeerConnection | null>(null);
     const dataChannelRef = useRef<RTCDataChannel | null>(null);
     const iceCandidateQueue = useRef<RTCIceCandidateInit[]>([]);
+    const startCallRequestedRef = useRef(false);
 
     // 1. Initialize Local Media (Once)
     useEffect(() => {
@@ -215,6 +216,9 @@ export function useWebRTC(
                 if (payload.guestId === myId) {
                     setGuestStatus('approved');
                     setConnectionStatus('connecting...');
+                    // Only the approved guest should initiate the WebRTC offer.
+                    startCallRequestedRef.current = true;
+                    console.log('[useWebRTC] approve-guest received for me; will startCall');
                 }
             })
             .on('broadcast', { event: 'reject-guest' }, ({ payload }: { payload: { guestId: string } }) => {
@@ -331,6 +335,16 @@ export function useWebRTC(
         }
     }, [myId, onSubtitleReceived]);
 
+    // When the host approves us, we initiate the WebRTC offer exactly once.
+    useEffect(() => {
+        if (guestStatus !== 'approved') return;
+        if (!startCallRequestedRef.current) return;
+
+        startCallRequestedRef.current = false;
+        console.log('[useWebRTC] starting WebRTC offer now');
+        void startCall();
+    }, [guestStatus, startCall]);
+
 
     const approveGuest = useCallback((guestId: string) => {
         if (!channelRef.current) return;
@@ -340,10 +354,7 @@ export function useWebRTC(
             payload: { guestId }
         });
         setGuestRequest(null);
-        setTimeout(() => {
-            startCall();
-        }, 1000);
-    }, [startCall]);
+    }, []);
 
     const rejectGuest = useCallback((guestId: string) => {
         if (!channelRef.current) return;
@@ -383,6 +394,7 @@ export function useWebRTC(
         setConnectionStatus('disconnected');
         setGuestStatus('idle');
         setIsHost(false);
+        startCallRequestedRef.current = false;
     }, [localStream]);
 
     return {
