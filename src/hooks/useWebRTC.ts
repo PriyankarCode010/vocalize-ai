@@ -242,10 +242,11 @@ export function useWebRTC(
             .on('presence', { event: 'sync' }, () => {
                 const state = channel.presenceState();
                 const users = Object.keys(state).map(key => {
-                    const presence = state[key][0] as unknown as { at?: string };
+                    const presence = state[key][0] as unknown as { at?: string; joined_at?: string };
+                    const ts = presence.at || presence.joined_at;
                     return {
                         id: key,
-                        joinedAt: presence.at ? new Date(presence.at).getTime() : 0
+                        joinedAt: ts ? new Date(ts).getTime() : 0
                     };
                 }).sort((a, b) => a.joinedAt - b.joinedAt);
 
@@ -370,7 +371,8 @@ export function useWebRTC(
             })
             .subscribe(async (status: string) => {
                 if (status === 'SUBSCRIBED') {
-                    await channel.track({ joined_at: new Date().toISOString() });
+                    // Presence timestamp used for host election (keep key consistent with reader above).
+                    await channel.track({ at: new Date().toISOString() });
                 }
             });
 
