@@ -39,6 +39,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     remoteStream, 
     sendSubtitle, 
     startCall, 
+    restartLocalMedia,
     connectionStatus,
     error: rtcError,
     isHost,
@@ -78,6 +79,8 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       }
     }
   }, roomId);
+
+  const attemptedRestartRef = useRef(false);
 
   // Handle client-side mounting to prevent hydration errors
   useEffect(() => {
@@ -161,6 +164,11 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             videoWidth: vid.videoWidth,
             videoHeight: vid.videoHeight,
           });
+          if (!attemptedRestartRef.current) {
+            attemptedRestartRef.current = true;
+            console.warn('[MeetingRoom] Restarting local media as fallback');
+            void restartLocalMedia();
+          }
         }
       };
 

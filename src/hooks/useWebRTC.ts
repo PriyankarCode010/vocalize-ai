@@ -22,6 +22,7 @@ interface UseWebRTCReturn {
     remoteStream: MediaStream | null;
     sendSubtitle: (text: string) => void;
     startCall: () => void;
+    restartLocalMedia: () => Promise<void>;
     leaveCall: () => void;
     connectionStatus: string;
     error: string | null;
@@ -52,6 +53,7 @@ export function useWebRTC(
     const dataChannelRef = useRef<RTCDataChannel | null>(null);
     const iceCandidateQueue = useRef<RTCIceCandidateInit[]>([]);
     const startCallRequestedRef = useRef(false);
+    const restartingMediaRef = useRef(false);
 
     // 1. Initialize Local Media (Once)
     useEffect(() => {
@@ -59,16 +61,20 @@ export function useWebRTC(
         const id = crypto.randomUUID();
         setMyId(id);
 
-        const getMedia = async () => {
+        const getMedia = async (simple: boolean) => {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { 
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 },
-                        facingMode: 'user'
-                    }, 
-                    audio: true 
-                });
+                const stream = await navigator.mediaDevices.getUserMedia(
+                    simple
+                        ? { video: true, audio: true }
+                        : {
+                              video: {
+                                  width: { ideal: 1280 },
+                                  height: { ideal: 720 },
+                                  facingMode: 'user'
+                              },
+                              audio: true
+                          }
+                );
                 
                 if (mounted) {
                     setLocalStream(stream);
@@ -80,11 +86,56 @@ export function useWebRTC(
                 setError('Failed to access camera/microphone');
             }
         };
-        getMedia();
+        void getMedia(false);
         return () => { 
             mounted = false;
         };
     }, []);
+
+    const restartLocalMedia = useCallback(async () => {
+        if (restartingMediaRef.current) return;
+        restartingMediaRef.current = true;
+        try {
+            const newStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+            // Swap tracks into existing PeerConnection if present.
+            const pc = peerRef.current;
+            const old = localStream;
+
+            if (pc) {
+                const senders = pc.getSenders();
+                const newVideo = newStream.getVideoTracks()[0] ?? null;
+                const newAudio = newStream.getAudioTracks()[0] ?? null;
+
+                for (const sender of senders) {
+                    const kind = sender.track?.kind;
+                    if (kind === 'video' && newVideo) {
+                        await sender.replaceTrack(newVideo);
+                    } else if (kind === 'audio' && newAudio) {
+                        await sender.replaceTrack(newAudio);
+                    }
+                }
+
+                // If sender missing (edge), add tracks.
+                if (newVideo && !senders.some(s => s.track?.kind === 'video')) {
+                    pc.addTrack(newVideo, newStream);
+                }
+                if (newAudio && !senders.some(s => s.track?.kind === 'audio')) {
+                    pc.addTrack(newAudio, newStream);
+                }
+            }
+
+            // Stop old tracks after swap.
+            if (old) old.getTracks().forEach(t => t.stop());
+            setLocalStream(newStream);
+            console.log('[useWebRTC] restartLocalMedia: replaced local tracks');
+        } catch (e) {
+            console.error('[useWebRTC] restartLocalMedia failed', e);
+            setError('Failed to restart camera/microphone');
+        } finally {
+            restartingMediaRef.current = false;
+        }
+    }, [localStream]);
 
     // 2. Initialize Supabase Realtime & WebRTC
     useEffect(() => {
@@ -430,6 +481,7 @@ export function useWebRTC(
         remoteStream,
         sendSubtitle,
         startCall,
+        restartLocalMedia,
         leaveCall,
         connectionStatus,
         error,
