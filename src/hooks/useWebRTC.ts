@@ -153,6 +153,10 @@ export function useWebRTC(
         };
 
         pc.ontrack = (event) => {
+            console.log('[useWebRTC] ontrack received', {
+                kind: event.track.kind,
+                trackId: event.track.id
+            });
             setRemoteStream((prev) => {
                 if (prev) {
                     const existingTrack = prev.getTracks().find((t: MediaStreamTrack) => t.id === event.track.id);
@@ -263,11 +267,18 @@ export function useWebRTC(
                         channel.send({
                             type: 'broadcast',
                             event: 'signal',
-                            payload: { type: 'answer', sdp: answer, from: myId }
+                            payload: {
+                                type: 'answer',
+                                sdp: (answer as RTCSessionDescription).toJSON
+                                    ? (answer as RTCSessionDescription).toJSON()
+                                    : { type: (answer as RTCSessionDescription).type, sdp: (answer as RTCSessionDescription).sdp },
+                                from: myId
+                            }
                         });
 
                     } else if (p.type === 'answer') {
                         if (!p.sdp) return;
+                        console.log('[useWebRTC] applying remote answer');
                         await pc.setRemoteDescription(new RTCSessionDescription(p.sdp));
 
                         // Process queued candidates
@@ -328,7 +339,13 @@ export function useWebRTC(
             channel.send({
                 type: 'broadcast',
                 event: 'signal',
-                payload: { type: 'offer', sdp: offer, from: myId }
+                payload: {
+                    type: 'offer',
+                    sdp: (offer as RTCSessionDescription).toJSON
+                        ? (offer as RTCSessionDescription).toJSON()
+                        : { type: (offer as RTCSessionDescription).type, sdp: (offer as RTCSessionDescription).sdp },
+                    from: myId
+                }
             });
         } catch (err) {
             console.error('[useWebRTC] 💥 Error creating offer:', err);
