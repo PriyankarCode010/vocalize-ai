@@ -106,10 +106,25 @@ export function useWebRTC(
         // --- PC Handlers ---
         pc.onicecandidate = (event) => {
             if (event.candidate) {
+                // RTCIceCandidate isn't JSON-serializable; always send the plain init form.
+                const candidateWithToJSON = event.candidate as unknown as {
+                    toJSON?: () => RTCIceCandidateInit;
+                    candidate: string;
+                    sdpMid?: string | null;
+                    sdpMLineIndex?: number | null;
+                };
+                const candidateInit =
+                    typeof candidateWithToJSON.toJSON === 'function'
+                        ? candidateWithToJSON.toJSON()
+                        : {
+                              candidate: candidateWithToJSON.candidate,
+                              sdpMid: candidateWithToJSON.sdpMid,
+                              sdpMLineIndex: candidateWithToJSON.sdpMLineIndex,
+                          };
                 channel.send({
                     type: 'broadcast',
                     event: 'signal',
-                    payload: { type: 'candidate', candidate: event.candidate, from: myId }
+                    payload: { type: 'candidate', candidate: candidateInit, from: myId }
                 });
             }
         };
@@ -169,10 +184,10 @@ export function useWebRTC(
             .on('presence', { event: 'sync' }, () => {
                 const state = channel.presenceState();
                 const users = Object.keys(state).map(key => {
-                    const presence = state[key][0] as any;
+                    const presence = state[key][0] as unknown as { at?: string };
                     return {
                         id: key,
-                        joinedAt: new Date(presence.at as string).getTime()
+                        joinedAt: presence.at ? new Date(presence.at).getTime() : 0
                     };
                 }).sort((a, b) => a.joinedAt - b.joinedAt);
 
@@ -207,15 +222,24 @@ export function useWebRTC(
                     setGuestStatus('rejected');
                 }
             })
-            .on('broadcast', { event: 'signal' }, async ({ payload }: { payload: any }) => {
-                if (payload.from === myId) return; // Ignore own messages
+            .on('broadcast', { event: 'signal' }, async ({ payload }: { payload: unknown }) => {
+                if (!payload || typeof payload !== 'object') return;
+                const p = payload as Partial<{
+                    from: string;
+                    type: 'offer' | 'answer' | 'candidate';
+                    sdp: RTCSessionDescriptionInit;
+                    candidate: RTCIceCandidateInit;
+                }>;
+
+                if (!p.from || p.from === myId) return; // Ignore own messages / invalid payload
 
                 try {
-                    if (payload.type === 'offer') {
+                    if (p.type === 'offer') {
                         if (pc.signalingState !== 'stable') {
                             return;
                         }
-                        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+                        if (!p.sdp) return;
+                        await pc.setRemoteDescription(new RTCSessionDescription(p.sdp));
 
                         // Process queued candidates
                         while (iceCandidateQueue.current.length > 0) {
@@ -238,8 +262,9 @@ export function useWebRTC(
                             payload: { type: 'answer', sdp: answer, from: myId }
                         });
 
-                    } else if (payload.type === 'answer') {
-                        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+                    } else if (p.type === 'answer') {
+                        if (!p.sdp) return;
+                        await pc.setRemoteDescription(new RTCSessionDescription(p.sdp));
 
                         // Process queued candidates
                         while (iceCandidateQueue.current.length > 0) {
@@ -253,11 +278,13 @@ export function useWebRTC(
                             }
                         }
 
-                    } else if (payload.type === 'candidate') {
+                    } else if (p.type === 'candidate') {
+                        if (!p.candidate || !p.candidate.candidate) return;
+
                         if (pc.remoteDescription) {
-                            await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+                            await pc.addIceCandidate(new RTCIceCandidate(p.candidate));
                         } else {
-                            iceCandidateQueue.current.push(payload.candidate);
+                            iceCandidateQueue.current.push(p.candidate);
                         }
                     }
                 } catch (e) {
