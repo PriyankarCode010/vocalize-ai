@@ -131,12 +131,14 @@ export function useWebRTC(
         };
 
         pc.oniceconnectionstatechange = () => {
+            console.log('[useWebRTC] iceConnectionState', pc.iceConnectionState);
             if (pc.iceConnectionState === 'failed') {
                 setError('Connection failed. Please refresh.');
             }
         };
 
         pc.onconnectionstatechange = () => {
+            console.log('[useWebRTC] connectionState', pc.connectionState);
             if (pc.connectionState === 'connected') {
                 setConnectionStatus('connected');
             } else if (pc.connectionState === 'failed') {
@@ -243,11 +245,15 @@ export function useWebRTC(
 
                 try {
                     if (p.type === 'offer') {
-                        if (pc.signalingState !== 'stable') {
+                        if (pc.signalingState === 'closed') return;
+                        if (!p.sdp) return;
+                        // Don't ignore offers due to timing; just ensure we only set it once.
+                        if (pc.remoteDescription) {
+                            console.log('[useWebRTC] ignoring duplicate offer (remoteDescription already set)');
                             return;
                         }
-                        if (!p.sdp) return;
                         await pc.setRemoteDescription(new RTCSessionDescription(p.sdp));
+                        console.log('[useWebRTC] offer applied, creating answer');
 
                         // Process queued candidates
                         while (iceCandidateQueue.current.length > 0) {
@@ -275,9 +281,14 @@ export function useWebRTC(
                                 from: myId
                             }
                         });
+                        console.log('[useWebRTC] answer sent');
 
                     } else if (p.type === 'answer') {
                         if (!p.sdp) return;
+                        if (pc.remoteDescription) {
+                            console.log('[useWebRTC] ignoring duplicate answer (remoteDescription already set)');
+                            return;
+                        }
                         console.log('[useWebRTC] applying remote answer');
                         await pc.setRemoteDescription(new RTCSessionDescription(p.sdp));
 
