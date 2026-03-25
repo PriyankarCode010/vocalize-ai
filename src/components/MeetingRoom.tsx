@@ -109,12 +109,16 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       });
       
       localVideoRef.current.srcObject = localStream;
+      // Ensure the element re-evaluates the new stream.
+      if (typeof localVideoRef.current.load === 'function') {
+        localVideoRef.current.load();
+      }
       
       // Keep muted=true to avoid autoplay policy issues; muted does not prevent rendering frames.
       localVideoRef.current.muted = true;
 
       const vid = localVideoRef.current;
-      const tryPlay = () => {
+      const startPlay = () => {
         void vid
           .play()
           .then(() => {
@@ -125,13 +129,23 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
           });
       };
 
-      // Play can be called before the stream is fully ready; wait for metadata if needed.
+      // Wait for metadata before calling play; this prevents "play resolved but no frames"
+      // scenarios where readyState is still 0.
       if (vid.readyState >= 2) {
-        tryPlay();
+        startPlay();
       } else {
-        vid.onloadedmetadata = tryPlay;
-        vid.oncanplay = tryPlay;
-        tryPlay();
+        const onReady = () => {
+          vid.removeEventListener('loadedmetadata', onReady);
+          vid.removeEventListener('canplay', onReady);
+          startPlay();
+        };
+        vid.addEventListener('loadedmetadata', onReady);
+        vid.addEventListener('canplay', onReady);
+        // Fallback: if events never fire, attempt once after a short delay.
+        window.setTimeout(() => {
+          if (vid.readyState >= 2) onReady();
+          else startPlay();
+        }, 1500);
       }
     } else {
         console.log('[MeetingRoom] ⚠️ Local video ref or stream missing', { 
