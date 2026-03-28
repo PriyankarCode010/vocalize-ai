@@ -7,6 +7,10 @@ create table if not exists public.meetings (
   created_at timestamptz default now()
 );
 
+-- Optional: add meetings to the Realtime publication so clients receive host_id updates
+-- when the current host leaves and a guest is promoted (see api/meeting/leave).
+-- alter publication supabase_realtime add table public.meetings;
+
 -- Tracks last time this room had any activity (signals / requests).
 alter table public.meetings
 add column if not exists last_activity_at timestamptz default now();

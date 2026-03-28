@@ -37,6 +37,8 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   const [joinRequestId, setJoinRequestId] = useState<string | null>(null)
   const [joinPhase, setJoinPhase] = useState<"idle" | "requesting" | "waiting" | "rejected">("idle")
   const [joinError, setJoinError] = useState<string | null>(null)
+  /** True when admission API allows /room (host or already-approved guest). */
+  const [canEnterRoom, setCanEnterRoom] = useState(false)
 
   useEffect(() => {
     const init = async () => {
@@ -65,6 +67,29 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
     }
     void init()
   }, [meetingId, supabase])
+
+  useEffect(() => {
+    if (loading || !meetingId) return
+    let cancelled = false
+    void (async () => {
+      const { data: auth } = await supabase.auth.getUser()
+      if (!auth?.user) {
+        if (!cancelled) setCanEnterRoom(false)
+        return
+      }
+      const res = await fetch(`/api/meeting/admission?meetingId=${encodeURIComponent(meetingId)}`)
+      if (cancelled) return
+      if (res.status === 401) {
+        setCanEnterRoom(false)
+        return
+      }
+      const j = (await res.json().catch(() => ({}))) as { allowed?: boolean }
+      if (!cancelled) setCanEnterRoom(Boolean(j.allowed))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [meetingId, supabase, loading, userId])
 
   useEffect(() => {
     const attach = () => {
@@ -355,7 +380,7 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
             {error && meeting && <p className="text-sm text-destructive">{error}</p>}
 
             <div className="flex flex-col gap-3">
-              {isHost ? (
+              {canEnterRoom ? (
                 <Button className="h-12 rounded-full text-base" onClick={handleHostEnterRoom}>
                   Join call
                 </Button>

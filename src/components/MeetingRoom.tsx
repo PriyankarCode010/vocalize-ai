@@ -550,8 +550,19 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             variant="destructive" 
             className="rounded-full gap-2 px-6"
             onClick={() => {
-                leaveCall();
-                window.location.href = '/';
+              void (async () => {
+                try {
+                  await fetch("/api/meeting/leave", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ meetingId: roomId }),
+                  })
+                } catch {
+                  /* still leave locally */
+                }
+                leaveCall()
+                window.location.href = "/"
+              })()
             }}
          >
             <PhoneOff className="h-4 w-4" />

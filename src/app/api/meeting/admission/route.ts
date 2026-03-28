@@ -38,6 +38,8 @@ export async function GET(request: Request) {
     .eq("meeting_id", meetingId)
     .eq("requester_id", auth.user.id)
     .eq("status", "approved")
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle()
 
   return NextResponse.json({

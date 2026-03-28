@@ -1,3 +1,18 @@
+-- Meetings: read for lobby; only host may update (e.g. host transfer on leave); creator inserts as host
+alter table public.meetings enable row level security;
+
+drop policy if exists meetings_select_public on public.meetings;
+create policy meetings_select_public on public.meetings
+  for select using (true);
+
+drop policy if exists meetings_insert_host on public.meetings;
+create policy meetings_insert_host on public.meetings
+  for insert with check (auth.uid() = host_id);
+
+drop policy if exists meetings_update_host on public.meetings;
+create policy meetings_update_host on public.meetings
+  for update using (auth.uid() = host_id);
+
 -- Fix signaling RLS to allow WebRTC offers/answers/ICE
 alter table public.meeting_signals enable row level security;
 

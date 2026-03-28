@@ -92,8 +92,25 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
       }
     }
     void load()
+
+    const ch = supabase
+      .channel(`meeting-host:${roomId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "meetings", filter: `id=eq.${roomId}` },
+        () => {
+          void load()
+        }
+      )
+      .subscribe()
+
     return () => {
       mounted = false
+      try {
+        supabase.removeChannel(ch)
+      } catch {
+        /* ignore */
+      }
     }
   }, [roomId])
 
