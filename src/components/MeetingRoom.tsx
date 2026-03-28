@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useRef, useState } from "react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import { Mic, MicOff, Video, VideoOff, Volume2, X, Share2, Check, PhoneOff, MessageSquare } from "lucide-react"
 import { useWebRTC } from "@/hooks/useWebRTC"
@@ -17,11 +17,11 @@ import type { User } from "@supabase/supabase-js"
 /** Hide on-video remote captions after this long with no new sign/text from peer (read transcript in sidebar). */
 const REMOTE_OVERLAY_IDLE_MS = 12_000
 
-/** After this long without local subtitle changes, save the current line to the Transcript (ASL rarely ends with . or !). */
+/** After this long without local subtitle changes, treat line as complete: polish → peer → Transcript → clear. */
 const TRANSCRIPT_LOCAL_DEBOUNCE_MS = 2200
 
-/** After signing output is stable this long, call Gemini once then send to the peer (efficient vs every frame). */
-const SUBTITLE_POLISH_DEBOUNCE_MS = 650
+/** Skip polish API calls for this long after server reports quota (this tab). */
+const CLIENT_POLISH_COOLDOWN_MS = 120_000
 
 function liveSignFromModel(current: string | null, raw: string | null): string {
   const bad = new Set(["no_sign_detected", "no sign found"])
@@ -78,8 +78,8 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     timestamp: Date.now(),
     isFinal: false,
   }));
-  const subtitlePolishTimerRef = useRef<number | null>(null);
-  const subtitlePolishAbortRef = useRef<AbortController | null>(null);
+  const sendSubtitleRef = useRef<(msg: string) => void>(() => {});
+  const subtitlePolishClientCooldownUntilRef = useRef(0);
   const aslPredRef = useRef<{ c: string | null; r: string | null }>({ c: null, r: null });
 
   // Initialize hooks
@@ -164,6 +164,66 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       }
     }
   }, roomId, { localDisplayName });
+
+  useEffect(() => {
+    sendSubtitleRef.current = sendSubtitle;
+  }, [sendSubtitle]);
+
+  /** Gemini polish → WebRTC → DB → clear local buffer (single path per committed line). */
+  const commitTranscriptLineWithPolish = useCallback(
+    async (rawLine: string, wireIsFinal: boolean) => {
+      const trimmed = rawLine.trim();
+      if (!trimmed) return false;
+
+      let textOut = trimmed;
+      if (Date.now() >= subtitlePolishClientCooldownUntilRef.current) {
+        try {
+          const res = await fetch("/api/subtitles/polish", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: trimmed }),
+          });
+          if (res.ok) {
+            const j = (await res.json()) as { polished?: string; quotaExceeded?: boolean };
+            if (j.quotaExceeded) {
+              subtitlePolishClientCooldownUntilRef.current = Date.now() + CLIENT_POLISH_COOLDOWN_MS;
+            }
+            if (typeof j.polished === "string" && j.polished.trim()) {
+              textOut = j.polished.trim();
+            }
+            if (process.env.NODE_ENV === "development") {
+              console.log("[commit line] raw:", trimmed, "→ polished:", textOut, j.quotaExceeded ? "(quota)" : "");
+            }
+          }
+        } catch {
+          /* network */
+        }
+      }
+
+      const { c, r } = aslPredRef.current;
+      const sign = liveSignFromModel(c, r);
+      const payload: SubtitleWirePayload = {
+        text: textOut,
+        sign,
+        raw: r && r !== c ? r : null,
+        isFinal: wireIsFinal,
+        timestamp: Date.now(),
+      };
+      if (!payload.text.trim() && !payload.sign) return false;
+
+      sendSubtitleRef.current(JSON.stringify(payload));
+
+      const ok = await persistOutgoingMessage(textOut);
+      if (ok) {
+        lastPersistedLocalRef.current = trimmed;
+        flushSync(() => {
+          clearLocalSubtitles();
+        });
+      }
+      return ok;
+    },
+    [persistOutgoingMessage, clearLocalSubtitles]
+  );
 
   const [hostJoinQueue, setHostJoinQueue] = useState<MeetingRequest[]>([])
 
@@ -385,79 +445,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     }
   }, [currentPrediction, addLocalPrediction, isMounted]);
 
-  // Debounced Gemini polish, then send sentence + live sign label to peer (data channel).
-  useEffect(() => {
-    if (!isMounted) return;
-
-    subtitlePolishAbortRef.current?.abort();
-    subtitlePolishAbortRef.current = new AbortController();
-    const ac = subtitlePolishAbortRef.current;
-
-    if (subtitlePolishTimerRef.current) {
-      clearTimeout(subtitlePolishTimerRef.current);
-      subtitlePolishTimerRef.current = null;
-    }
-
-    subtitlePolishTimerRef.current = window.setTimeout(() => {
-      subtitlePolishTimerRef.current = null;
-
-      void (async () => {
-        const sentence = getSubtitleDataRef.current();
-        const text = localSubtitlesRef.current.trim();
-        const { c, r } = aslPredRef.current;
-        const sign = liveSignFromModel(c, r);
-
-        if (!text && !sign) return;
-
-        let out = text;
-        if (text) {
-          try {
-            const res = await fetch("/api/subtitles/polish", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text }),
-              signal: ac.signal,
-            });
-            if (res.ok) {
-              const j = (await res.json()) as { polished?: string };
-              if (typeof j.polished === "string" && j.polished.trim()) {
-                out = j.polished.trim();
-              }
-              if (process.env.NODE_ENV === "development" && text) {
-                console.log("[subtitles/polish client] raw:", text, "→ polished:", out);
-              }
-            }
-          } catch {
-            /* aborted or network */
-          }
-        }
-
-        if (ac.signal.aborted) return;
-
-        const payload: SubtitleWirePayload = {
-          text: out,
-          sign,
-          raw: r && r !== c ? r : null,
-          isFinal: sentence.isFinal,
-          timestamp: Date.now(),
-        };
-
-        if (!payload.text.trim() && !payload.sign) return;
-
-        sendSubtitle(JSON.stringify(payload));
-      })();
-    }, SUBTITLE_POLISH_DEBOUNCE_MS);
-
-    return () => {
-      if (subtitlePolishTimerRef.current) {
-        clearTimeout(subtitlePolishTimerRef.current);
-        subtitlePolishTimerRef.current = null;
-      }
-      ac.abort();
-    };
-  }, [localSubtitles, currentPrediction, rawPrediction, isMounted, sendSubtitle]);
-
-  // Save your line to Transcript: immediately when isFinal (. ! trailing space), else after a pause while signing.
+  // Commit line: polish (Gemini) → sendSubtitle → Transcript → clear local (no separate polish loop).
   useEffect(() => {
     if (!isMounted || !roomId) return;
 
@@ -479,13 +467,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
         transcriptDebounceRef.current = null;
       }
       const snapshot = t;
-      void persistOutgoingMessage(snapshot).then((ok) => {
-        if (!ok) return;
-        lastPersistedLocalRef.current = snapshot;
-        flushSync(() => {
-          clearLocalSubtitles();
-        });
-      });
+      void commitTranscriptLineWithPolish(snapshot, true);
       return;
     }
 
@@ -496,13 +478,8 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       transcriptDebounceRef.current = null;
       const latest = localSubtitlesRef.current.trim();
       if (!latest || latest === lastPersistedLocalRef.current) return;
-      void persistOutgoingMessage(latest).then((ok) => {
-        if (!ok) return;
-        lastPersistedLocalRef.current = latest;
-        flushSync(() => {
-          clearLocalSubtitles();
-        });
-      });
+      const wireFinal = getSubtitleDataRef.current().isFinal;
+      void commitTranscriptLineWithPolish(latest, wireFinal);
     }, TRANSCRIPT_LOCAL_DEBOUNCE_MS);
 
     return () => {
@@ -511,7 +488,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
         transcriptDebounceRef.current = null;
       }
     };
-  }, [localSubtitles, getSubtitleData, isMounted, roomId, persistOutgoingMessage, clearLocalSubtitles]);
+  }, [localSubtitles, getSubtitleData, isMounted, roomId, commitTranscriptLineWithPolish]);
 
   // Don't render until mounted to prevent hydration errors
   if (!isMounted) {

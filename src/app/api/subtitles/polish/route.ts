@@ -1,14 +1,22 @@
 import { GoogleGenerativeAI } from "@google/generative-ai"
 import { NextResponse } from "next/server"
 import { buildSubtitlePolishPrompt } from "@/lib/subtitles/polish-prompt"
+import {
+  isGeminiQuotaError,
+  isSubtitlePolishCoolingDown,
+  startSubtitlePolishCooldown,
+} from "@/lib/subtitles/polish-quota"
 
 const MAX_INPUT = 2000
 
+/** Default model: 1.5-flash often has separate free-tier quota from 2.0-flash. Override with GEMINI_SUBTITLE_MODEL. */
+const DEFAULT_MODEL = "gemini-1.5-flash"
+
 /**
- * POST { text: string } → { polished: string }
+ * POST { text: string } → { polished: string, quotaExceeded?: boolean }
  * Server-only GEMINI_API_KEY. If unset, returns input unchanged (no error).
  *
- * Optional env: GEMINI_SUBTITLE_MODEL (default gemini-2.0-flash)
+ * Env: GEMINI_API_KEY, GEMINI_SUBTITLE_MODEL (default gemini-1.5-flash)
  */
 export async function POST(request: Request) {
   let text = ""
@@ -33,7 +41,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ polished: trimmed })
   }
 
-  const modelName = process.env.GEMINI_SUBTITLE_MODEL || "gemini-2.0-flash"
+  if (isSubtitlePolishCoolingDown()) {
+    return NextResponse.json({
+      polished: trimmed,
+      quotaExceeded: true,
+      skippedReason: "server_cooldown",
+    })
+  }
+
+  const modelName = process.env.GEMINI_SUBTITLE_MODEL?.trim() || DEFAULT_MODEL
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey)
@@ -55,8 +71,15 @@ export async function POST(request: Request) {
     console.log("[subtitles/polish] OUT:", polished)
     return NextResponse.json({ polished })
   } catch (e) {
-    console.error("[api/subtitles/polish] error, returning raw input:", e)
-    console.log("[subtitles/polish] IN (fallback):", trimmed)
+    if (isGeminiQuotaError(e)) {
+      startSubtitlePolishCooldown()
+      console.warn(
+        "[subtitles/polish] Gemini quota/rate limit (429) — passthrough for ~90s. Try GEMINI_SUBTITLE_MODEL=gemini-1.5-flash-8b or enable billing:",
+        modelName
+      )
+      return NextResponse.json({ polished: trimmed, quotaExceeded: true })
+    }
+    console.error("[api/subtitles/polish] error, returning raw input:", e instanceof Error ? e.message : e)
     return NextResponse.json({ polished: trimmed })
   }
 }
