@@ -21,6 +21,22 @@ const getIceServers = (): RTCConfiguration => {
   return { iceServers: servers }
 }
 
+function readRemoteDisplayName(presenceState: Record<string, unknown>, myPresenceKey: string): string {
+  const keys = Object.keys(presenceState || {}).filter(Boolean)
+  const inRoom = keys.filter((k) => !k.startsWith("lobby:"))
+  const other = inRoom.find((k) => k !== myPresenceKey)
+  if (!other) return ""
+  const metas = presenceState[other]
+  if (!Array.isArray(metas) || !metas[0] || typeof metas[0] !== "object") return "Guest"
+  const m = metas[0] as Record<string, unknown>
+  const name = typeof m.display_name === "string" ? m.display_name.trim() : ""
+  return name || "Guest"
+}
+
+export interface UseWebRTCOptions {
+  localDisplayName?: string | null
+}
+
 export interface UseWebRTCReturn {
   localStream: MediaStream | null
   remoteStream: MediaStream | null
@@ -32,6 +48,8 @@ export interface UseWebRTCReturn {
   connectionStatus: string
   error: string | null
   isHost: boolean
+  /** From the other in-room presence payload (display_name). */
+  remoteDisplayName: string
 }
 
 /**
@@ -39,7 +57,11 @@ export interface UseWebRTCReturn {
  * Deterministic negotiation: lexicographically smallest presence key creates the offer
  * so exactly one side is the offerer (no glare, no host-approve gate).
  */
-export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: string): UseWebRTCReturn {
+export function useWebRTC(
+  onSubtitleReceived: (text: string) => void,
+  roomId: string,
+  options?: UseWebRTCOptions
+): UseWebRTCReturn {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
   const [mediaReady, setMediaReady] = useState(false)
@@ -48,6 +70,8 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
   const [error, setError] = useState<string | null>(null)
   const [isHost, setIsHost] = useState(false)
   const [myId, setMyId] = useState("")
+  const [remoteDisplayName, setRemoteDisplayName] = useState("")
+  const displayNameRef = useRef("Participant")
 
   const channelRef = useRef<RealtimeChannel | null>(null)
   const peerRef = useRef<RTCPeerConnection | null>(null)
@@ -72,6 +96,21 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
   useEffect(() => {
     myIdRef.current = myId
   }, [myId])
+
+  useEffect(() => {
+    const n = options?.localDisplayName?.trim()
+    displayNameRef.current = n && n.length > 0 ? n : "Participant"
+  }, [options?.localDisplayName])
+
+  // Re-publish presence when display name loads so the peer sees it.
+  useEffect(() => {
+    const ch = channelRef.current
+    if (!ch) return
+    void ch.track({
+      joined_at: new Date().toISOString(),
+      display_name: displayNameRef.current,
+    })
+  }, [options?.localDisplayName])
 
   // Host badge only — do NOT tie WebRTC lifecycle to this (avoids tearing down PC when host_id loads).
   useEffect(() => {
@@ -397,6 +436,9 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
         }
       }
 
+      setRemoteDisplayName(
+        readRemoteDisplayName(channel.presenceState() as Record<string, unknown>, myIdRef.current)
+      )
       tryStartNegotiation(channel, pc, myIdRef.current)
     })
       .on("broadcast", { event: "signal" }, async ({ payload }: { payload: unknown }) => {
@@ -448,7 +490,13 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
       })
       .subscribe(async (status: string) => {
         if (status === "SUBSCRIBED") {
-          await channel.track({ joined_at: new Date().toISOString() })
+          await channel.track({
+            joined_at: new Date().toISOString(),
+            display_name: displayNameRef.current,
+          })
+          setRemoteDisplayName(
+            readRemoteDisplayName(channel.presenceState() as Record<string, unknown>, myId)
+          )
           tryStartNegotiation(channel, pc, myId)
         }
       })
@@ -469,6 +517,7 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
       dataChannelRef.current = null
       subtitleQueueRef.current = []
       negotiationStartedRef.current = false
+      setRemoteDisplayName("")
     }
   }, [mediaReady, myId, roomId, reconnectEpoch, tryStartNegotiation, flushSubtitleQueue])
 
@@ -517,6 +566,7 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
     setRemoteStream(null)
     setConnectionStatus("disconnected")
     setError(null)
+    setRemoteDisplayName("")
   }, [])
 
   return {
@@ -530,5 +580,6 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
     connectionStatus,
     error,
     isHost,
+    remoteDisplayName,
   }
 }

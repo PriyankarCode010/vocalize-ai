@@ -10,6 +10,10 @@ create table if not exists public.meetings (
 -- Optional: add meetings to the Realtime publication so clients receive host_id updates
 -- when the current host leaves and a guest is promoted (see api/meeting/leave).
 -- alter publication supabase_realtime add table public.meetings;
+--
+-- Transcript sidebar (INSERT messages + DELETE clear votes):
+-- alter publication supabase_realtime add table public.meeting_chat_messages;
+-- alter publication supabase_realtime add table public.meeting_chat_clear_votes;
 
 -- Tracks last time this room had any activity (signals / requests).
 alter table public.meetings
@@ -33,6 +37,44 @@ create table if not exists public.meeting_signals (
   payload jsonb not null,
   created_at timestamptz default now()
 );
+
+-- In-call transcript (final signed / spoken lines). Cleared only when both participants vote to clear.
+create table if not exists public.meeting_chat_messages (
+  id uuid primary key default gen_random_uuid(),
+  meeting_id uuid not null references public.meetings on delete cascade,
+  sender_id uuid not null references auth.users on delete cascade,
+  sender_name text,
+  body text not null,
+  created_at timestamptz default now()
+);
+
+create index if not exists meeting_chat_messages_meeting_created_idx
+  on public.meeting_chat_messages (meeting_id, created_at asc);
+
+-- Each user taps "Clear history" once; when two distinct users have voted, messages are deleted and votes reset.
+create table if not exists public.meeting_chat_clear_votes (
+  meeting_id uuid not null references public.meetings on delete cascade,
+  user_id uuid not null references auth.users on delete cascade,
+  updated_at timestamptz default now(),
+  primary key (meeting_id, user_id)
+);
+
+create or replace function public.touch_meeting_from_chat_message()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.meetings set last_activity_at = now() where id = new.meeting_id;
+  return new;
+end;
+$$;
+
+drop trigger if exists meeting_chat_messages_touch_activity on public.meeting_chat_messages;
+create trigger meeting_chat_messages_touch_activity
+after insert on public.meeting_chat_messages
+for each row execute function public.touch_meeting_from_chat_message();
 
 -- Deletes old signaling/request rows for rooms that have been inactive for N minutes.
 -- This prevents stale WebRTC signals from accumulating and affecting later joins.

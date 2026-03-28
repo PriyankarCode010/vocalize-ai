@@ -25,6 +25,15 @@ export type MeetingSignal = {
   created_at: string
 }
 
+export type MeetingChatMessage = {
+  id: string
+  meeting_id: string
+  sender_id: string
+  sender_name: string | null
+  body: string
+  created_at: string
+}
+
 
 
 

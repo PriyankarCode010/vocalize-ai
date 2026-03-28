@@ -1,15 +1,17 @@
 "use client"
 
 import React, { useEffect, useRef, useState } from "react"
-import { Mic, MicOff, Video, VideoOff, Volume2, X, Share2, Check, PhoneOff } from "lucide-react"
+import { Mic, MicOff, Video, VideoOff, Volume2, X, Share2, Check, PhoneOff, MessageSquare } from "lucide-react"
 import { useWebRTC } from "@/hooks/useWebRTC"
 import { useASLRecognition, drawLandmarks } from "@/hooks/useASLRecognition"
 import { useSubtitles, type SubtitleWirePayload } from "@/hooks/useSubtitles"
+import { useMeetingChat } from "@/hooks/useMeetingChat"
 import { useSpeech } from "@/hooks/useSpeech"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 import type { MeetingRequest } from "@/types/meeting"
+import type { User } from "@supabase/supabase-js"
 
 function liveSignFromModel(current: string | null, raw: string | null): string {
   const bad = new Set(["no_sign_detected", "no sign found"])
@@ -55,6 +57,11 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [localDisplayName, setLocalDisplayName] = useState<string | null>(null);
+  const [selfUserId, setSelfUserId] = useState<string | null>(null);
+
+  const remoteOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPersistedLocalRef = useRef("");
 
   // Initialize hooks
   const { speak: speakText } = useSpeech();
@@ -65,9 +72,19 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     addLocalPrediction,
     addRemoteSubtitle,
     clearLocalSubtitles,
+    clearRemoteSubtitles,
     getSubtitleData,
   } = useSubtitles();
-  
+
+  const {
+    messages: chatMessages,
+    loading: chatLoading,
+    listRef: chatListRef,
+    persistOutgoingMessage,
+    voteClearHistory,
+    waitingPeerClear,
+  } = useMeetingChat(roomId, isMounted);
+
   const {
     localStream,
     remoteStream,
@@ -78,7 +95,12 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     error: rtcError,
     isHost,
     leaveCall,
+    remoteDisplayName,
   } = useWebRTC((data) => {
+    if (remoteOverlayTimerRef.current) {
+      clearTimeout(remoteOverlayTimerRef.current);
+      remoteOverlayTimerRef.current = null;
+    }
     try {
       const parsed = JSON.parse(data) as Record<string, unknown>
       const text = typeof parsed.text === "string" ? parsed.text : ""
@@ -92,14 +114,22 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       })
       if (parsed.isFinal && text.trim()) {
         speakText(text.trim())
+        remoteOverlayTimerRef.current = setTimeout(() => {
+          clearRemoteSubtitles()
+          remoteOverlayTimerRef.current = null
+        }, 12000)
       }
     } catch {
       if (data && String(data).trim().length > 0) {
         addRemoteSubtitle({ text: String(data).trim(), sign: "", isFinal: true })
         speakText(String(data).trim())
+        remoteOverlayTimerRef.current = setTimeout(() => {
+          clearRemoteSubtitles()
+          remoteOverlayTimerRef.current = null
+        }, 12000)
       }
     }
-  }, roomId);
+  }, roomId, { localDisplayName });
 
   const [hostJoinQueue, setHostJoinQueue] = useState<MeetingRequest[]>([])
 
@@ -170,6 +200,38 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   // Handle client-side mounting to prevent hydration errors
   useEffect(() => {
     setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isMounted) return;
+    const supabase = getSupabaseBrowserClient();
+    void supabase.auth.getUser().then(({ data: auth }: { data: { user: User | null } }) => {
+      const u = auth.user;
+      if (!u) return;
+      setSelfUserId(u.id);
+      void supabase
+        .from("profiles")
+        .select("display_name")
+        .eq("id", u.id)
+        .maybeSingle()
+        .then(({ data: profile }: { data: { display_name: string | null } | null }) => {
+          setLocalDisplayName(
+            profile?.display_name?.trim() ||
+              (typeof u.user_metadata?.full_name === "string" ? u.user_metadata.full_name : null) ||
+              u.email ||
+              null
+          );
+        });
+    });
+  }, [isMounted]);
+
+  useEffect(() => {
+    return () => {
+      if (remoteOverlayTimerRef.current) {
+        clearTimeout(remoteOverlayTimerRef.current);
+        remoteOverlayTimerRef.current = null;
+      }
+    };
   }, []);
 
   const aslEnabled =
@@ -306,6 +368,19 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     sendSubtitle(JSON.stringify(payload))
   }, [localSubtitles, currentPrediction, rawPrediction, sendSubtitle, getSubtitleData, isMounted])
 
+  useEffect(() => {
+    if (!isMounted || !roomId) return;
+    const { text, isFinal } = getSubtitleData();
+    if (!text.trim()) {
+      lastPersistedLocalRef.current = "";
+      return;
+    }
+    if (!isFinal) return;
+    if (text === lastPersistedLocalRef.current) return;
+    lastPersistedLocalRef.current = text;
+    void persistOutgoingMessage(text);
+  }, [localSubtitles, getSubtitleData, isMounted, roomId, persistOutgoingMessage]);
+
   // Draw Landmarks
   useEffect(() => {
     if (!isMounted || !canvasRef.current || !landmarks) return;
@@ -346,6 +421,10 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       setTimeout(() => setIsCopied(false), 2000)
     })
   }
+
+  const handleClearTranscript = () => {
+    void voteClearHistory();
+  };
 
   return (
     <div className="flex flex-col min-h-[calc(100vh-64px)] bg-background text-foreground p-4 relative">
@@ -424,8 +503,9 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
         </div>
       </div>
 
-      {/* Main Grid — min-h-0 lets grid children respect aspect-video without blowing layout */}
-      <div className="flex-1 grid min-h-0 grid-cols-1 md:grid-cols-2 gap-4 relative items-start">
+      {/* Main grid + transcript sidebar */}
+      <div className="flex flex-col lg:flex-row flex-1 gap-4 min-h-0 items-stretch">
+      <div className="flex-1 min-w-0 min-h-0 grid min-h-0 grid-cols-1 md:grid-cols-2 gap-4 relative items-start">
         {/* Local Feed — same aspect + absolute video as remote (fixes black band under stream) */}
         <div className="relative w-full aspect-video min-h-0 rounded-2xl overflow-hidden bg-black border border-border shadow-md">
           <video
@@ -453,8 +533,9 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             </p>
           </div>
 
-          <div className="absolute top-3 left-3 z-10 bg-background/60 px-2 py-1 rounded text-xs border border-border/40 backdrop-blur-sm">
-            You {isMuted && "(Muted)"}
+          <div className="absolute top-3 left-3 z-10 bg-background/60 px-2 py-1 rounded text-xs border border-border/40 backdrop-blur-sm max-w-[85%] truncate">
+            You{localDisplayName ? ` (${localDisplayName})` : ""}
+            {isMuted ? " (Muted)" : ""}
           </div>
         </div>
 
@@ -492,12 +573,80 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             </div>
           )}
 
-          <div className="absolute top-3 left-3 z-10 bg-background/60 px-2 py-1 rounded text-xs flex items-center gap-2 border border-border/40 backdrop-blur-sm">
+          <div className="absolute top-3 left-3 z-10 bg-background/60 px-2 py-1 rounded text-xs flex items-center gap-2 border border-border/40 backdrop-blur-sm max-w-[85%]">
             <div className={`w-2 h-2 rounded-full shrink-0 ${remoteStream ? "bg-green-500" : "bg-red-500"}`} />
-            Remote User
+            <span className="truncate">
+              {remoteStream
+                ? remoteDisplayName?.trim() || "Guest"
+                : isHost
+                  ? "Waiting for guest…"
+                  : "Connecting…"}
+            </span>
           </div>
         </div>
 
+      </div>
+
+      <aside className="flex flex-col shrink-0 w-full lg:w-80 min-h-[260px] lg:min-h-0 lg:max-h-[calc(100vh-12rem)] border border-border rounded-2xl bg-card shadow-md overflow-hidden">
+        <div className="flex items-center gap-2 border-b border-border px-4 py-3 bg-muted/30">
+          <MessageSquare className="h-4 w-4 text-muted-foreground shrink-0" />
+          <span className="font-semibold text-sm">Transcript</span>
+          {chatLoading && <span className="text-xs text-muted-foreground ml-auto">Loading…</span>}
+        </div>
+        <div
+          ref={chatListRef}
+          className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[180px] lg:min-h-0"
+        >
+          {chatMessages.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6 px-2">
+              Final messages from both of you appear here. Missed something on video? Scroll back.
+            </p>
+          ) : (
+            chatMessages.map((m) => {
+              const mine = selfUserId && m.sender_id === selfUserId;
+              return (
+                <div
+                  key={m.id}
+                  className={`rounded-xl px-3 py-2 text-sm border ${
+                    mine
+                      ? "bg-primary/10 border-primary/25 ml-4"
+                      : "bg-muted/50 border-border mr-4"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="font-medium text-xs text-muted-foreground truncate">
+                      {mine ? "You" : m.sender_name || "Guest"}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+                      {new Date(m.created_at).toLocaleTimeString(undefined, {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                  <p className="text-foreground leading-snug break-words whitespace-pre-wrap">{m.body}</p>
+                </div>
+              );
+            })
+          )}
+        </div>
+        <div className="border-t border-border p-3 space-y-2 bg-muted/20">
+          {waitingPeerClear && (
+            <p className="text-xs text-muted-foreground text-center">
+              Waiting for the other person to confirm clearing the transcript.
+            </p>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full rounded-full text-xs"
+            type="button"
+            onClick={handleClearTranscript}
+          >
+            Clear transcript (both must confirm)
+          </Button>
+        </div>
+      </aside>
       </div>
 
       {/* Controls Bar */}

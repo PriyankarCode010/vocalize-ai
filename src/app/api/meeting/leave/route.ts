@@ -30,6 +30,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Meeting not found" }, { status: 404 })
   }
 
+  await supabase
+    .from("meeting_chat_clear_votes")
+    .delete()
+    .eq("meeting_id", meetingId)
+    .eq("user_id", auth.user.id)
+
   if (!meeting.host_id || meeting.host_id !== auth.user.id) {
     return NextResponse.json({ ok: true, transferred: false })
   }

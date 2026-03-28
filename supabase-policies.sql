@@ -55,4 +55,104 @@ create policy mr_update on public.meeting_requests
   )
   with check (true);
 
+-- Meeting chat: host or approved guest only
+alter table public.meeting_chat_messages enable row level security;
+drop policy if exists mcm_select on public.meeting_chat_messages;
+drop policy if exists mcm_insert on public.meeting_chat_messages;
+drop policy if exists mcm_delete on public.meeting_chat_messages;
+
+create policy mcm_select on public.meeting_chat_messages
+  for select using (
+    auth.uid() is not null
+    and (
+      auth.uid() in (select m.host_id from public.meetings m where m.id = meeting_chat_messages.meeting_id)
+      or exists (
+        select 1 from public.meeting_requests mr
+        where mr.meeting_id = meeting_chat_messages.meeting_id
+          and mr.requester_id = auth.uid()
+          and mr.status = 'approved'
+      )
+    )
+  );
+
+create policy mcm_insert on public.meeting_chat_messages
+  for insert with check (
+    auth.uid() = sender_id
+    and (
+      auth.uid() in (select m.host_id from public.meetings m where m.id = meeting_chat_messages.meeting_id)
+      or exists (
+        select 1 from public.meeting_requests mr
+        where mr.meeting_id = meeting_chat_messages.meeting_id
+          and mr.requester_id = auth.uid()
+          and mr.status = 'approved'
+      )
+    )
+  );
+
+create policy mcm_delete on public.meeting_chat_messages
+  for delete using (
+    auth.uid() is not null
+    and (
+      auth.uid() in (select m.host_id from public.meetings m where m.id = meeting_chat_messages.meeting_id)
+      or exists (
+        select 1 from public.meeting_requests mr
+        where mr.meeting_id = meeting_chat_messages.meeting_id
+          and mr.requester_id = auth.uid()
+          and mr.status = 'approved'
+      )
+    )
+  );
+
+alter table public.meeting_chat_clear_votes enable row level security;
+drop policy if exists mccv_select on public.meeting_chat_clear_votes;
+drop policy if exists mccv_upsert on public.meeting_chat_clear_votes;
+drop policy if exists mccv_update on public.meeting_chat_clear_votes;
+drop policy if exists mccv_delete on public.meeting_chat_clear_votes;
+
+create policy mccv_select on public.meeting_chat_clear_votes
+  for select using (
+    auth.uid() is not null
+    and (
+      auth.uid() in (select m.host_id from public.meetings m where m.id = meeting_chat_clear_votes.meeting_id)
+      or exists (
+        select 1 from public.meeting_requests mr
+        where mr.meeting_id = meeting_chat_clear_votes.meeting_id
+          and mr.requester_id = auth.uid()
+          and mr.status = 'approved'
+      )
+    )
+  );
+
+create policy mccv_upsert on public.meeting_chat_clear_votes
+  for insert with check (
+    auth.uid() = user_id
+    and (
+      auth.uid() in (select m.host_id from public.meetings m where m.id = meeting_chat_clear_votes.meeting_id)
+      or exists (
+        select 1 from public.meeting_requests mr
+        where mr.meeting_id = meeting_chat_clear_votes.meeting_id
+          and mr.requester_id = auth.uid()
+          and mr.status = 'approved'
+      )
+    )
+  );
+
+create policy mccv_update on public.meeting_chat_clear_votes
+  for update using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy mccv_delete on public.meeting_chat_clear_votes
+  for delete using (
+    auth.uid() is not null
+    and (
+      auth.uid() in (select m.host_id from public.meetings m where m.id = meeting_chat_clear_votes.meeting_id)
+      or exists (
+        select 1 from public.meeting_requests mr
+        where mr.meeting_id = meeting_chat_clear_votes.meeting_id
+          and mr.requester_id = auth.uid()
+          and mr.status = 'approved'
+      )
+    )
+  );
+
 
