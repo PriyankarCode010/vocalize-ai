@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react"
 import { Mic, MicOff, Video, VideoOff, Volume2, X, Share2, Check, PhoneOff, MessageSquare } from "lucide-react"
 import { useWebRTC } from "@/hooks/useWebRTC"
-import { useASLRecognition, drawLandmarks } from "@/hooks/useASLRecognition"
+import { useASLRecognition } from "@/hooks/useASLRecognition"
 import { useSubtitles, type SubtitleWirePayload } from "@/hooks/useSubtitles"
 import { useMeetingChat } from "@/hooks/useMeetingChat"
 import { useSpeech } from "@/hooks/useSpeech"
@@ -12,6 +12,9 @@ import { Card, CardContent } from "@/components/ui/card"
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 import type { MeetingRequest } from "@/types/meeting"
 import type { User } from "@supabase/supabase-js"
+
+/** Hide on-video remote captions after this long with no new sign/text from peer (read transcript in sidebar). */
+const REMOTE_OVERLAY_IDLE_MS = 12_000
 
 function liveSignFromModel(current: string | null, raw: string | null): string {
   const bad = new Set(["no_sign_detected", "no sign found"])
@@ -51,7 +54,6 @@ function attachStream(
 export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -76,6 +78,11 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     getSubtitleData,
   } = useSubtitles();
 
+  const clearRemoteSubtitlesRef = useRef(clearRemoteSubtitles);
+  useEffect(() => {
+    clearRemoteSubtitlesRef.current = clearRemoteSubtitles;
+  }, [clearRemoteSubtitles]);
+
   const {
     messages: chatMessages,
     loading: chatLoading,
@@ -97,36 +104,40 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     leaveCall,
     remoteDisplayName,
   } = useWebRTC((data) => {
-    if (remoteOverlayTimerRef.current) {
-      clearTimeout(remoteOverlayTimerRef.current);
-      remoteOverlayTimerRef.current = null;
+    const scheduleOverlayHideIfLive = (hasVisual: boolean) => {
+      if (!hasVisual) return
+      if (remoteOverlayTimerRef.current) {
+        clearTimeout(remoteOverlayTimerRef.current)
+        remoteOverlayTimerRef.current = null
+      }
+      remoteOverlayTimerRef.current = setTimeout(() => {
+        clearRemoteSubtitlesRef.current()
+        remoteOverlayTimerRef.current = null
+      }, REMOTE_OVERLAY_IDLE_MS)
     }
+
     try {
       const parsed = JSON.parse(data) as Record<string, unknown>
       const text = typeof parsed.text === "string" ? parsed.text : ""
       const hasLive =
         typeof parsed.sign === "string" || typeof parsed.raw === "string"
+      const liveStr = hasLive ? String(parsed.sign ?? parsed.raw ?? "").trim() : ""
       addRemoteSubtitle({
         text,
         ...(hasLive ? { sign: String(parsed.sign ?? parsed.raw ?? "") } : {}),
         isFinal: Boolean(parsed.isFinal),
         timestamp: typeof parsed.timestamp === "number" ? parsed.timestamp : Date.now(),
       })
+      scheduleOverlayHideIfLive(Boolean(text.trim() || liveStr))
       if (parsed.isFinal && text.trim()) {
         speakText(text.trim())
-        remoteOverlayTimerRef.current = setTimeout(() => {
-          clearRemoteSubtitles()
-          remoteOverlayTimerRef.current = null
-        }, 12000)
       }
     } catch {
       if (data && String(data).trim().length > 0) {
-        addRemoteSubtitle({ text: String(data).trim(), sign: "", isFinal: true })
-        speakText(String(data).trim())
-        remoteOverlayTimerRef.current = setTimeout(() => {
-          clearRemoteSubtitles()
-          remoteOverlayTimerRef.current = null
-        }, 12000)
+        const t = String(data).trim()
+        addRemoteSubtitle({ text: t, sign: "", isFinal: true })
+        speakText(t)
+        scheduleOverlayHideIfLive(true)
       }
     }
   }, roomId, { localDisplayName });
@@ -239,7 +250,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     !isVideoOff &&
     Boolean(typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_URL)
 
-  const { currentPrediction, rawPrediction, landmarks } = useASLRecognition({
+  const { currentPrediction, rawPrediction } = useASLRecognition({
     videoRef: localVideoRef,
     enabled: aslEnabled,
   });
@@ -381,16 +392,6 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     void persistOutgoingMessage(text);
   }, [localSubtitles, getSubtitleData, isMounted, roomId, persistOutgoingMessage]);
 
-  // Draw Landmarks
-  useEffect(() => {
-    if (!isMounted || !canvasRef.current || !landmarks) return;
-    const ctx = canvasRef.current.getContext('2d');
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-    drawLandmarks(ctx, landmarks);
-  }, [landmarks, isMounted]);
-
   // Don't render until mounted to prevent hydration errors
   if (!isMounted) {
     return (
@@ -517,15 +518,6 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             className={`absolute inset-0 block h-full w-full min-h-full min-w-full object-cover bg-black ${isVideoOff ? "hidden" : ""}`}
           />
 
-          {!isVideoOff && (
-            <canvas
-              ref={canvasRef}
-              className="absolute inset-0 block h-full w-full object-cover pointer-events-none"
-              width={640}
-              height={480}
-            />
-          )}
-
           <div className="absolute bottom-3 left-3 right-3 z-10 bg-background/75 p-3 rounded-lg backdrop-blur-sm border border-border/50 shadow-sm">
             <p className="text-xs text-muted-foreground mb-1">Your Sentence:</p>
             <p className="text-lg font-medium min-h-6 leading-snug">
@@ -555,21 +547,23 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             </div>
           )}
 
-          {/* Remote: live model output + built sentence from peer */}
+          {/* Remote: subtitle-style overlay (hidden after idle — full history stays in Transcript sidebar) */}
           {(remoteLiveSign || remoteSubtitles) && (
-            <div className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 max-w-[95%] flex flex-col items-center gap-2 pointer-events-none">
-              {remoteLiveSign ? (
-                <div className="bg-primary/95 text-primary-foreground px-4 py-1.5 rounded-full border border-primary shadow-lg">
-                  <p className="text-xs font-medium uppercase tracking-wide opacity-90">Sign</p>
-                  <p className="text-lg font-bold text-center leading-tight">{remoteLiveSign}</p>
-                </div>
-              ) : null}
-              {remoteSubtitles ? (
-                <div className="bg-popover/90 px-5 py-2.5 rounded-2xl backdrop-blur-md border border-border shadow-xl">
-                  <p className="text-xs text-muted-foreground mb-0.5">Message</p>
-                  <p className="text-xl font-semibold text-center text-popover-foreground">{remoteSubtitles}</p>
-                </div>
-              ) : null}
+            <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2 max-w-[92%] pointer-events-none">
+              <div className="rounded-md bg-black/80 px-4 py-2.5 text-center shadow-lg ring-1 ring-white/15">
+                {remoteLiveSign ? (
+                  <p className="text-sm font-medium text-white/90 leading-snug">{remoteLiveSign}</p>
+                ) : null}
+                {remoteSubtitles ? (
+                  <p
+                    className={`text-lg sm:text-xl font-medium text-white leading-snug ${
+                      remoteLiveSign ? "mt-1.5 pt-1.5 border-t border-white/20" : ""
+                    }`}
+                  >
+                    {remoteSubtitles}
+                  </p>
+                ) : null}
+              </div>
             </div>
           )}
 
@@ -599,7 +593,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
         >
           {chatMessages.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-6 px-2">
-              Final messages from both of you appear here. Missed something on video? Scroll back.
+              Final lines are saved here. On-video captions hide after your peer stops signing for a while—scroll back if you missed anything.
             </p>
           ) : (
             chatMessages.map((m) => {
