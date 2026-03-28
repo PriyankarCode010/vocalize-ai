@@ -59,6 +59,11 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
   const negotiationStartedRef = useRef(false)
   const onSubtitleReceivedRef = useRef(onSubtitleReceived)
   const myIdRef = useRef("")
+  /** Presence: we saw 2+ in-room peers (non-lobby keys); used to detect peer leave. */
+  const hadTwoPeersRef = useRef(false)
+  const peerLeaveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [reconnectEpoch, setReconnectEpoch] = useState(0)
 
   useEffect(() => {
     onSubtitleReceivedRef.current = onSubtitleReceived
@@ -270,23 +275,62 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
       })
     }
 
+    const clearRemoteTracks = () => {
+      setRemoteStream((prev) => {
+        if (prev) {
+          prev.getTracks().forEach((tr) => {
+            try {
+              tr.stop()
+            } catch {
+              /* ignore */
+            }
+          })
+        }
+        return null
+      })
+      dataChannelRef.current = null
+    }
+
     pc.oniceconnectionstatechange = () => {
       if (pc.iceConnectionState === "failed") {
         setError("Network connection failed. Try leaving and rejoining.")
+        clearRemoteTracks()
+        negotiationStartedRef.current = false
       }
     }
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") setConnectionStatus("connected")
-      else if (pc.connectionState === "failed") {
-        setConnectionStatus("failed")
-        setError("Connection failed")
+      else if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+        setConnectionStatus(pc.connectionState)
+        setError(pc.connectionState === "failed" ? "Connection failed" : null)
+        clearRemoteTracks()
+        negotiationStartedRef.current = false
       } else if (pc.connectionState === "disconnected") {
         setConnectionStatus("disconnected")
       }
     }
 
     pc.ontrack = (event) => {
+      const track = event.track
+      track.onended = () => {
+        setRemoteStream((prev) => {
+          if (!prev) return null
+          const live = prev.getTracks().filter((tr) => tr.readyState === "live")
+          if (live.length === 0) {
+            prev.getTracks().forEach((tr) => {
+              try {
+                tr.stop()
+              } catch {
+                /* ignore */
+              }
+            })
+            return null
+          }
+          return new MediaStream(live)
+        })
+      }
+
       setRemoteStream((prev) => {
         if (prev?.getTracks().some((t) => t.id === event.track.id)) return prev
         if (prev) {
@@ -309,10 +353,35 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
       if (track.readyState === "live") pc.addTrack(track, stream)
     })
 
-    channel
-      .on("presence", { event: "sync" }, () => {
-        tryStartNegotiation(channel, pc, myIdRef.current)
-      })
+    channel.on("presence", { event: "sync" }, () => {
+      const state = channel.presenceState() as Record<string, unknown>
+      const keys = Object.keys(state || {}).filter(Boolean)
+      const inRoomPeers = keys.filter((k) => !k.startsWith("lobby:"))
+
+      if (inRoomPeers.length >= 2) {
+        hadTwoPeersRef.current = true
+        if (peerLeaveDebounceRef.current) {
+          clearTimeout(peerLeaveDebounceRef.current)
+          peerLeaveDebounceRef.current = null
+        }
+      } else if (inRoomPeers.length < 2 && hadTwoPeersRef.current) {
+        if (!peerLeaveDebounceRef.current) {
+          peerLeaveDebounceRef.current = setTimeout(() => {
+            peerLeaveDebounceRef.current = null
+            const s2 = channel.presenceState() as Record<string, unknown>
+            const k2 = Object.keys(s2 || {})
+              .filter(Boolean)
+              .filter((x) => !x.startsWith("lobby:"))
+            if (k2.length < 2) {
+              hadTwoPeersRef.current = false
+              setReconnectEpoch((e) => e + 1)
+            }
+          }, 550)
+        }
+      }
+
+      tryStartNegotiation(channel, pc, myIdRef.current)
+    })
       .on("broadcast", { event: "signal" }, async ({ payload }: { payload: unknown }) => {
         if (!payload || typeof payload !== "object") return
         const p = payload as Partial<{
@@ -368,6 +437,10 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
       })
 
     return () => {
+      if (peerLeaveDebounceRef.current) {
+        clearTimeout(peerLeaveDebounceRef.current)
+        peerLeaveDebounceRef.current = null
+      }
       try {
         channel.unsubscribe()
       } catch {
@@ -380,7 +453,7 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
       subtitleQueueRef.current = []
       negotiationStartedRef.current = false
     }
-  }, [mediaReady, myId, roomId, tryStartNegotiation, flushSubtitleQueue])
+  }, [mediaReady, myId, roomId, reconnectEpoch, tryStartNegotiation, flushSubtitleQueue])
 
   const startCall = useCallback(() => {
     const ch = channelRef.current

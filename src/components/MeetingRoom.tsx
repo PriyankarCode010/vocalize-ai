@@ -220,12 +220,17 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     return () => document.removeEventListener("touchstart", onTouchStart);
   }, [localStream]);
 
-  // Bind remote video.
+  // Bind remote video — clear srcObject when peer leaves or stream drops (avoids frozen last frame).
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      attachStream(remoteVideoRef.current, remoteStream);
+    const el = remoteVideoRef.current
+    if (!el) return
+    if (remoteStream) {
+      attachStream(el, remoteStream)
+    } else {
+      el.srcObject = null
+      el.load?.()
     }
-  }, [remoteStream]);
+  }, [remoteStream])
 
   const restartCamera = React.useCallback(async () => {
     try {
