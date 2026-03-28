@@ -1,546 +1,414 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { getSupabaseBrowserClient } from '@/lib/supabase/browser';
-import { RealtimeChannel } from '@supabase/supabase-js';
+import { useEffect, useRef, useState, useCallback } from "react"
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
+import type { RealtimeChannel, User } from "@supabase/supabase-js"
 
-const getIceServers = () => {
-    const servers: RTCIceServer[] = [
-        { urls: 'stun:stun.l.google.com:19302' }
-    ];
-
-    if (process.env.NEXT_PUBLIC_TURN_URL && process.env.NEXT_PUBLIC_TURN_USERNAME && process.env.NEXT_PUBLIC_TURN_PASSWORD) {
-        servers.push({
-            urls: process.env.NEXT_PUBLIC_TURN_URL,
-            username: process.env.NEXT_PUBLIC_TURN_USERNAME,
-            credential: process.env.NEXT_PUBLIC_TURN_PASSWORD,
-        });
-    }
-    return { iceServers: servers };
-};
-
-interface UseWebRTCReturn {
-    localStream: MediaStream | null;
-    remoteStream: MediaStream | null;
-    sendSubtitle: (text: string) => void;
-    startCall: () => void;
-    restartLocalMedia: () => Promise<void>;
-    replaceLocalStream: (stream: MediaStream) => Promise<void>;
-    leaveCall: () => void;
-    connectionStatus: string;
-    error: string | null;
-    isHost: boolean;
-    guestStatus: 'idle' | 'waiting' | 'approved' | 'rejected';
-    guestRequest: string | null; // ID of the guest waiting
-    approveGuest: (guestId: string) => void;
-    rejectGuest: (guestId: string) => void;
+const getIceServers = (): RTCConfiguration => {
+  const servers: RTCIceServer[] = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ]
+  if (
+    process.env.NEXT_PUBLIC_TURN_URL &&
+    process.env.NEXT_PUBLIC_TURN_USERNAME &&
+    process.env.NEXT_PUBLIC_TURN_PASSWORD
+  ) {
+    servers.push({
+      urls: process.env.NEXT_PUBLIC_TURN_URL,
+      username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+      credential: process.env.NEXT_PUBLIC_TURN_PASSWORD,
+    })
+  }
+  return { iceServers: servers }
 }
 
-export function useWebRTC(
-    onSubtitleReceived: (text: string) => void,
-    roomId: string
-): UseWebRTCReturn {
-    const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-    const localStreamRef = useRef<MediaStream | null>(null);
-    const [mediaReady, setMediaReady] = useState(false);
-    const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-    const [connectionStatus, setConnectionStatus] = useState<string>('disconnected');
-    const [error, setError] = useState<string | null>(null);
+export interface UseWebRTCReturn {
+  localStream: MediaStream | null
+  remoteStream: MediaStream | null
+  sendSubtitle: (text: string) => void
+  startCall: () => void
+  restartLocalMedia: () => Promise<void>
+  replaceLocalStream: (stream: MediaStream) => Promise<void>
+  leaveCall: () => void
+  connectionStatus: string
+  error: string | null
+  isHost: boolean
+}
 
-    // Host / Guest Logic
-    const [isHost, setIsHost] = useState(false);
-    const [guestStatus, setGuestStatus] = useState<'idle' | 'waiting' | 'approved' | 'rejected'>('idle');
-    const [guestRequest, setGuestRequest] = useState<string | null>(null);
-    const [myId, setMyId] = useState<string>('');
-    const [meetingHostId, setMeetingHostId] = useState<string | null>(null);
+/**
+ * 1:1 WebRTC video/voice over Supabase Realtime broadcast signaling.
+ * Deterministic negotiation: lexicographically smallest presence key creates the offer
+ * so exactly one side is the offerer (no glare, no host-approve gate).
+ */
+export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: string): UseWebRTCReturn {
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const localStreamRef = useRef<MediaStream | null>(null)
+  const [mediaReady, setMediaReady] = useState(false)
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
+  const [connectionStatus, setConnectionStatus] = useState("disconnected")
+  const [error, setError] = useState<string | null>(null)
+  const [isHost, setIsHost] = useState(false)
+  const [myId, setMyId] = useState("")
 
-    const channelRef = useRef<RealtimeChannel | null>(null);
-    const peerRef = useRef<RTCPeerConnection | null>(null);
-    const dataChannelRef = useRef<RTCDataChannel | null>(null);
-    const iceCandidateQueue = useRef<RTCIceCandidateInit[]>([]);
-    const startCallRequestedRef = useRef(false);
-    const restartingMediaRef = useRef(false);
+  const channelRef = useRef<RealtimeChannel | null>(null)
+  const peerRef = useRef<RTCPeerConnection | null>(null)
+  const dataChannelRef = useRef<RTCDataChannel | null>(null)
+  const iceCandidateQueue = useRef<RTCIceCandidateInit[]>([])
+  const restartingMediaRef = useRef(false)
+  const negotiationStartedRef = useRef(false)
+  const onSubtitleReceivedRef = useRef(onSubtitleReceived)
+  const myIdRef = useRef("")
 
-    // Host identity is derived strictly from the room table (no presence ordering).
-    useEffect(() => {
-        setIsHost(Boolean(meetingHostId && meetingHostId === myId));
-    }, [meetingHostId, myId]);
+  useEffect(() => {
+    onSubtitleReceivedRef.current = onSubtitleReceived
+  }, [onSubtitleReceived])
 
-    // 0. Resolve stable identity + meeting host (Once per room)
-    useEffect(() => {
-        let mounted = true;
-        const supabase = getSupabaseBrowserClient();
+  useEffect(() => {
+    myIdRef.current = myId
+  }, [myId])
 
-        const initIdentity = async () => {
-            try {
-                const { data } = await supabase.auth.getUser();
-                const authId = data?.user?.id ?? null;
-                const stableId = authId || crypto.randomUUID();
-                if (mounted) setMyId(stableId);
-            } catch (e) {
-                if (mounted) setMyId(crypto.randomUUID());
-            }
-
-            try {
-                if (!roomId) return;
-                const { data, error } = await supabase.from('meetings').select('host_id').eq('id', roomId).single();
-                if (!error && data?.host_id && mounted) {
-                    setMeetingHostId(data.host_id as string);
-                }
-            } catch {
-                // ignore
-            }
-        };
-
-        void initIdentity();
-        return () => {
-            mounted = false;
-        };
-    }, [roomId]);
-
-    // 1. Initialize Local Media (Once)
-    useEffect(() => {
-        let mounted = true;
-
-        const startCamera = async () => {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: true,
-                    audio: true
-                });
-
-                // Ensure preview is not "disabled" by default.
-                stream.getVideoTracks().forEach((track) => {
-                    track.enabled = true;
-                });
-                
-                if (mounted) {
-                    setLocalStream(stream);
-                    setMediaReady(true);
-                } else {
-                    stream.getTracks().forEach(t => t.stop());
-                }
-            } catch (err) {
-                console.error('[useWebRTC] Error accessing media devices:', err);
-                setError('Failed to access camera/microphone');
-            }
-        };
-        void startCamera();
-        return () => { 
-            mounted = false;
-        };
-    }, []);
-
-    // Keep ref in sync for effects that shouldn't rerun on localStream replacement.
-    useEffect(() => {
-        localStreamRef.current = localStream;
-    }, [localStream]);
-
-    const replaceLocalStream = useCallback(async (stream: MediaStream) => {
-        const pc = peerRef.current;
-        const old = localStreamRef.current;
-
-        // Swap tracks into existing PeerConnection if present.
-        if (pc) {
-            const senders = pc.getSenders();
-            const newVideo = stream.getVideoTracks()[0] ?? null;
-            const newAudio = stream.getAudioTracks()[0] ?? null;
-
-            for (const sender of senders) {
-                const kind = sender.track?.kind;
-                if (kind === 'video' && newVideo && newVideo.readyState === 'live') {
-                    await sender.replaceTrack(newVideo);
-                } else if (kind === 'audio' && newAudio && newAudio.readyState === 'live') {
-                    await sender.replaceTrack(newAudio);
-                }
-            }
-
-            // If sender missing (edge), add only live tracks.
-            if (
-                newVideo &&
-                newVideo.readyState === 'live' &&
-                !senders.some((s) => s.track?.kind === 'video')
-            ) {
-                pc.addTrack(newVideo, stream);
-            }
-            if (
-                newAudio &&
-                newAudio.readyState === 'live' &&
-                !senders.some((s) => s.track?.kind === 'audio')
-            ) {
-                pc.addTrack(newAudio, stream);
-            }
+  // Host badge only — do NOT tie WebRTC lifecycle to this (avoids tearing down PC when host_id loads).
+  useEffect(() => {
+    let mounted = true
+    const supabase = getSupabaseBrowserClient()
+    const load = async () => {
+      try {
+        const { data: auth } = await supabase.auth.getUser()
+        const uid = auth?.user?.id ?? null
+        if (!roomId || !uid) {
+          if (mounted) setIsHost(false)
+          return
         }
+        const { data } = await supabase.from("meetings").select("host_id").eq("id", roomId).single()
+        if (mounted) setIsHost(Boolean(data?.host_id && data.host_id === uid))
+      } catch {
+        if (mounted) setIsHost(false)
+      }
+    }
+    void load()
+    return () => {
+      mounted = false
+    }
+  }, [roomId])
 
-        // Stop old tracks after swap.
-        if (old) old.getTracks().forEach((t) => t.stop());
+  // Stable identity for presence + SDP routing
+  useEffect(() => {
+    let mounted = true
+    const supabase = getSupabaseBrowserClient()
+    void supabase.auth.getUser().then(({ data }: { data: { user: User | null } }) => {
+      const authId = data.user?.id ?? null
+      const id = authId || crypto.randomUUID()
+      if (mounted) setMyId(id)
+    })
+    return () => {
+      mounted = false
+    }
+  }, [])
 
-        setLocalStream(stream);
-        setMediaReady(true);
-        console.log('[useWebRTC] replaceLocalStream: local tracks replaced');
-    }, []);
+  // Local media once
+  useEffect(() => {
+    let mounted = true
+    void (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        stream.getVideoTracks().forEach((t) => {
+          t.enabled = true
+        })
+        if (mounted) {
+          setLocalStream(stream)
+          setMediaReady(true)
+        } else {
+          stream.getTracks().forEach((t) => t.stop())
+        }
+      } catch (err) {
+        console.error("[useWebRTC] getUserMedia:", err)
+        if (mounted) setError("Failed to access camera/microphone")
+      }
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [])
 
-    const restartLocalMedia = useCallback(async () => {
-        if (restartingMediaRef.current) return;
-        restartingMediaRef.current = true;
+  useEffect(() => {
+    localStreamRef.current = localStream
+  }, [localStream])
+
+  const replaceLocalStream = useCallback(async (stream: MediaStream) => {
+    const pc = peerRef.current
+    const old = localStreamRef.current
+    if (pc) {
+      const senders = pc.getSenders()
+      const newVideo = stream.getVideoTracks()[0] ?? null
+      const newAudio = stream.getAudioTracks()[0] ?? null
+      for (const sender of senders) {
+        const kind = sender.track?.kind
+        if (kind === "video" && newVideo?.readyState === "live") await sender.replaceTrack(newVideo)
+        else if (kind === "audio" && newAudio?.readyState === "live") await sender.replaceTrack(newAudio)
+      }
+      if (newVideo?.readyState === "live" && !senders.some((s) => s.track?.kind === "video")) {
+        pc.addTrack(newVideo, stream)
+      }
+      if (newAudio?.readyState === "live" && !senders.some((s) => s.track?.kind === "audio")) {
+        pc.addTrack(newAudio, stream)
+      }
+    }
+    if (old) old.getTracks().forEach((t) => t.stop())
+    setLocalStream(stream)
+    setMediaReady(true)
+  }, [])
+
+  const restartLocalMedia = useCallback(async () => {
+    if (restartingMediaRef.current) return
+    restartingMediaRef.current = true
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      newStream.getVideoTracks().forEach((t) => {
+        t.enabled = true
+      })
+      await replaceLocalStream(newStream)
+    } catch (e) {
+      console.error("[useWebRTC] restartLocalMedia", e)
+      setError("Failed to restart camera/microphone")
+    } finally {
+      restartingMediaRef.current = false
+    }
+  }, [replaceLocalStream])
+
+  const tryStartNegotiation = useCallback(
+    (channel: RealtimeChannel, pc: RTCPeerConnection, myPresenceKey: string) => {
+      if (negotiationStartedRef.current) return
+      const state = channel.presenceState() as Record<string, unknown>
+      const keys = Object.keys(state || {}).filter(Boolean)
+      if (keys.length < 2) return
+
+      const sorted = [...keys].sort()
+      const iAmOfferer = sorted[0] === myPresenceKey
+      negotiationStartedRef.current = true
+      setConnectionStatus("connecting…")
+
+      if (!iAmOfferer) return
+
+      void (async () => {
         try {
-            const newStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            newStream.getVideoTracks().forEach((track) => {
-                track.enabled = true;
-            });
-            await replaceLocalStream(newStream);
-        } catch (e) {
-            console.error('[useWebRTC] restartLocalMedia failed', e);
-            setError('Failed to restart camera/microphone');
-        } finally {
-            restartingMediaRef.current = false;
-        }
-    }, [replaceLocalStream]);
+          const dc = pc.createDataChannel("subtitles", { ordered: true })
+          dataChannelRef.current = dc
+          dc.onmessage = (e) => onSubtitleReceivedRef.current(e.data)
 
-    // 2. Initialize Supabase Realtime & WebRTC
-    useEffect(() => {
-        if (!mediaReady || !myId || !roomId) return;
-        const stream = localStreamRef.current;
-        if (!stream) return;
-
-        const supabase = getSupabaseBrowserClient();
-        const channel = supabase.channel(roomId, {
-            config: {
-                presence: {
-                    key: myId,
-                },
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+          channel.send({
+            type: "broadcast",
+            event: "signal",
+            payload: {
+              type: "offer",
+              sdp: pc.localDescription?.toJSON?.() ?? { type: offer.type, sdp: offer.sdp },
+              from: myPresenceKey,
             },
-        });
-        channelRef.current = channel;
-
-        // Setup PC
-        const pc = new RTCPeerConnection(getIceServers());
-        peerRef.current = pc;
-
-        // --- PC Handlers ---
-        pc.onicecandidate = (event) => {
-            if (event.candidate) {
-                // RTCIceCandidate isn't JSON-serializable; always send the plain init form.
-                const candidateWithToJSON = event.candidate as unknown as {
-                    toJSON?: () => RTCIceCandidateInit;
-                    candidate: string;
-                    sdpMid?: string | null;
-                    sdpMLineIndex?: number | null;
-                };
-                const candidateInit =
-                    typeof candidateWithToJSON.toJSON === 'function'
-                        ? candidateWithToJSON.toJSON()
-                        : {
-                              candidate: candidateWithToJSON.candidate,
-                              sdpMid: candidateWithToJSON.sdpMid,
-                              sdpMLineIndex: candidateWithToJSON.sdpMLineIndex,
-                          };
-                channel.send({
-                    type: 'broadcast',
-                    event: 'signal',
-                    payload: { type: 'candidate', candidate: candidateInit, from: myId }
-                });
-            }
-        };
-
-        pc.oniceconnectionstatechange = () => {
-            console.log('[useWebRTC] iceConnectionState', pc.iceConnectionState);
-            if (pc.iceConnectionState === 'failed') {
-                setError('Connection failed. Please refresh.');
-            }
-        };
-
-        pc.onconnectionstatechange = () => {
-            console.log('[useWebRTC] connectionState', pc.connectionState);
-            if (pc.connectionState === 'connected') {
-                setConnectionStatus('connected');
-            } else if (pc.connectionState === 'failed') {
-                setConnectionStatus('failed');
-                setError('Connection failed. Please refresh.');
-            }
-        };
-
-        pc.onsignalingstatechange = () => {
-            // Signaling state changes are noisy, only log errors
-            if (pc.signalingState === 'closed') {
-                console.error('[WebRTC] Signaling failed:', pc.signalingState);
-            }
-        };
-
-        pc.ontrack = (event) => {
-            console.log('[useWebRTC] ontrack received', {
-                kind: event.track.kind,
-                trackId: event.track.id
-            });
-            setRemoteStream((prev) => {
-                if (prev) {
-                    const existingTrack = prev.getTracks().find((t: MediaStreamTrack) => t.id === event.track.id);
-                    if (existingTrack) {
-                        return prev;
-                    }
-                    
-                    const newStream = new MediaStream(prev.getTracks());
-                    newStream.addTrack(event.track);
-                    return newStream;
-                } else {
-                    return new MediaStream([event.track]);
-                }
-            });
-        };
-
-        pc.ondatachannel = (event) => {
-            const receiveChannel = event.channel;
-            dataChannelRef.current = receiveChannel;
-            receiveChannel.onmessage = (e) => onSubtitleReceived(e.data);
-        };
-
-        // Add only live tracks to the peer connection.
-        stream.getTracks().forEach((track) => {
-            if (track.readyState === 'live') {
-                pc.addTrack(track, stream);
-            }
-        });
-
-        // --- Channel Handlers ---
-        channel
-            .on('presence', { event: 'sync' }, () => {
-                const amIHost = Boolean(meetingHostId && meetingHostId === myId);
-
-                if (!amIHost && guestStatus === 'idle') {
-                    setGuestStatus('waiting');
-                    channel.send({
-                        type: 'broadcast',
-                        event: 'join-request',
-                        payload: { guestId: myId }
-                    });
-                }
-            })
-            .on('broadcast', { event: 'join-request' }, ({ payload }: { payload: { guestId: string } }) => {
-                if (payload.guestId !== myId) {
-                    setGuestRequest(payload.guestId);
-                }
-            })
-            .on('broadcast', { event: 'approve-guest' }, ({ payload }: { payload: { guestId: string } }) => {
-                if (payload.guestId === myId) {
-                    setGuestStatus('approved');
-                    setConnectionStatus('connecting...');
-                    // Only the approved guest should initiate the WebRTC offer.
-                    startCallRequestedRef.current = true;
-                    console.log('[useWebRTC] approve-guest received for me; will startCall');
-                }
-            })
-            .on('broadcast', { event: 'reject-guest' }, ({ payload }: { payload: { guestId: string } }) => {
-                if (payload.guestId === myId) {
-                    setGuestStatus('rejected');
-                }
-            })
-            .on('broadcast', { event: 'signal' }, async ({ payload }: { payload: unknown }) => {
-                if (!payload || typeof payload !== 'object') return;
-                const p = payload as Partial<{
-                    from: string;
-                    type: 'offer' | 'answer' | 'candidate';
-                    sdp: RTCSessionDescriptionInit;
-                    candidate: RTCIceCandidateInit;
-                }>;
-
-                if (!p.from || p.from === myId) return; // Ignore own messages / invalid payload
-
-                try {
-                    if (p.type === 'offer') {
-                        if (pc.signalingState === 'closed') return;
-                        if (!p.sdp) return;
-                        // Don't ignore offers due to timing; just ensure we only set it once.
-                        if (pc.remoteDescription) {
-                            console.log('[useWebRTC] ignoring duplicate offer (remoteDescription already set)');
-                            return;
-                        }
-                        await pc.setRemoteDescription(new RTCSessionDescription(p.sdp));
-                        console.log('[useWebRTC] offer applied, creating answer');
-
-                        // Process queued candidates
-                        while (iceCandidateQueue.current.length > 0) {
-                            const cand = iceCandidateQueue.current.shift();
-                            if (cand) {
-                                try {
-                                    await pc.addIceCandidate(new RTCIceCandidate(cand));
-                                } catch (e) {
-                                    console.error('[WebRTC] Error processing queued candidate:', e);
-                                }
-                            }
-                        }
-
-                        const answer = await pc.createAnswer();
-                        await pc.setLocalDescription(answer);
-
-                        channel.send({
-                            type: 'broadcast',
-                            event: 'signal',
-                            payload: {
-                                type: 'answer',
-                                sdp: (answer as RTCSessionDescription).toJSON
-                                    ? (answer as RTCSessionDescription).toJSON()
-                                    : { type: (answer as RTCSessionDescription).type, sdp: (answer as RTCSessionDescription).sdp },
-                                from: myId
-                            }
-                        });
-                        console.log('[useWebRTC] answer sent');
-
-                    } else if (p.type === 'answer') {
-                        if (!p.sdp) return;
-                if (pc.remoteDescription) {
-                            console.log('[useWebRTC] ignoring duplicate answer (remoteDescription already set)');
-                            return;
-                        }
-                        console.log('[useWebRTC] applying remote answer');
-                        await pc.setRemoteDescription(new RTCSessionDescription(p.sdp));
-
-                        // Process queued candidates
-                        while (iceCandidateQueue.current.length > 0) {
-                            const cand = iceCandidateQueue.current.shift();
-                            if (cand) {
-                                try {
-                                    await pc.addIceCandidate(new RTCIceCandidate(cand));
-                                } catch (e) {
-                                    console.error('[WebRTC] Error processing queued candidate:', e);
-                                }
-                            }
-                        }
-
-                    } else if (p.type === 'candidate') {
-                        if (!p.candidate || !p.candidate.candidate) return;
-
-                        if (pc.remoteDescription) {
-                            await pc.addIceCandidate(new RTCIceCandidate(p.candidate));
-                        } else {
-                            iceCandidateQueue.current.push(p.candidate);
-                        }
-                    }
-                } catch (e) {
-                    console.error('[WebRTC] 💥 Error processing signal:', e);
-                }
-            })
-            .subscribe(async (status: string) => {
-                if (status === 'SUBSCRIBED') {
-                    // Presence timestamp used for host election (keep key consistent with reader above).
-                    await channel.track({ at: new Date().toISOString() });
-                }
-            });
-
-        return () => {
-            channel.unsubscribe();
-            pc.close();
-        };
-    }, [mediaReady, myId, roomId, meetingHostId]);
-
-
-    const startCall = useCallback(async () => {
-        const pc = peerRef.current;
-        const channel = channelRef.current;
-        if (!pc || !channel) {
-            return;
-        }
-
-        // Create Data Channel
-        try {
-            const dataChannel = pc.createDataChannel('subtitles');
-            dataChannelRef.current = dataChannel;
-            dataChannel.onmessage = (e) => onSubtitleReceived(e.data);
-
-            // Create Offer
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-
-            channel.send({
-                type: 'broadcast',
-                event: 'signal',
-                payload: {
-                    type: 'offer',
-                    sdp: (offer as RTCSessionDescription).toJSON
-                        ? (offer as RTCSessionDescription).toJSON()
-                        : { type: (offer as RTCSessionDescription).type, sdp: (offer as RTCSessionDescription).sdp },
-                    from: myId
-                }
-            });
+          })
         } catch (err) {
-            console.error('[useWebRTC] 💥 Error creating offer:', err);
+          console.error("[useWebRTC] offer failed:", err)
+          negotiationStartedRef.current = false
+          setError("Could not start call")
         }
-    }, [myId, onSubtitleReceived]);
+      })()
+    },
+    []
+  )
 
-    // When the host approves us, we initiate the WebRTC offer exactly once.
-    useEffect(() => {
-        if (guestStatus !== 'approved') return;
-        if (!startCallRequestedRef.current) return;
+  // WebRTC + signaling — deps intentionally exclude meetingHostId
+  useEffect(() => {
+    if (!mediaReady || !myId || !roomId) return
+    const stream = localStreamRef.current
+    if (!stream) return
 
-        startCallRequestedRef.current = false;
-        console.log('[useWebRTC] starting WebRTC offer now');
-        void startCall();
-    }, [guestStatus, startCall]);
+    negotiationStartedRef.current = false
+    iceCandidateQueue.current = []
+    setRemoteStream(null)
+    setConnectionStatus("signaling")
+    setError(null)
 
+    const supabase = getSupabaseBrowserClient()
+    const channel = supabase.channel(roomId, {
+      config: { presence: { key: myId } },
+    })
+    channelRef.current = channel
 
-    const approveGuest = useCallback((guestId: string) => {
-        if (!channelRef.current) return;
-        channelRef.current.send({
-            type: 'broadcast',
-            event: 'approve-guest',
-            payload: { guestId }
-        });
-        setGuestRequest(null);
-    }, []);
+    const pc = new RTCPeerConnection(getIceServers())
+    peerRef.current = pc
 
-    const rejectGuest = useCallback((guestId: string) => {
-        if (!channelRef.current) return;
-        channelRef.current.send({
-            type: 'broadcast',
-            event: 'reject-guest',
-            payload: { guestId }
-        });
-        setGuestRequest(null);
-    }, []);
+    pc.onicecandidate = (event) => {
+      if (!event.candidate) return
+      const c = event.candidate as RTCIceCandidate & { toJSON?: () => RTCIceCandidateInit }
+      const init = typeof c.toJSON === "function" ? c.toJSON() : {
+        candidate: c.candidate,
+        sdpMid: c.sdpMid,
+        sdpMLineIndex: c.sdpMLineIndex,
+      }
+      channel.send({
+        type: "broadcast",
+        event: "signal",
+        payload: { type: "candidate", candidate: init, from: myId },
+      })
+    }
 
-    const sendSubtitle = useCallback((text: string) => {
-        if (dataChannelRef.current?.readyState === 'open') {
-            dataChannelRef.current.send(text);
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === "failed") {
+        setError("Network connection failed. Try leaving and rejoining.")
+      }
+    }
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected") setConnectionStatus("connected")
+      else if (pc.connectionState === "failed") {
+        setConnectionStatus("failed")
+        setError("Connection failed")
+      } else if (pc.connectionState === "disconnected") {
+        setConnectionStatus("disconnected")
+      }
+    }
+
+    pc.ontrack = (event) => {
+      setRemoteStream((prev) => {
+        if (prev?.getTracks().some((t) => t.id === event.track.id)) return prev
+        if (prev) {
+          const ns = new MediaStream(prev.getTracks())
+          ns.addTrack(event.track)
+          return ns
         }
-    }, []);
+        return new MediaStream([event.track])
+      })
+    }
 
-    const leaveCall = useCallback(() => {
-        // Stop local tracks
-        if (localStream) {
-            localStream.getTracks().forEach((track: MediaStreamTrack) => track.stop());
+    pc.ondatachannel = (event) => {
+      const ch = event.channel
+      dataChannelRef.current = ch
+      ch.onmessage = (e) => onSubtitleReceivedRef.current(e.data)
+    }
+
+    stream.getTracks().forEach((track) => {
+      if (track.readyState === "live") pc.addTrack(track, stream)
+    })
+
+    channel
+      .on("presence", { event: "sync" }, () => {
+        tryStartNegotiation(channel, pc, myIdRef.current)
+      })
+      .on("broadcast", { event: "signal" }, async ({ payload }: { payload: unknown }) => {
+        if (!payload || typeof payload !== "object") return
+        const p = payload as Partial<{
+          from: string
+          type: "offer" | "answer" | "candidate"
+          sdp: RTCSessionDescriptionInit
+          candidate: RTCIceCandidateInit
+        }>
+        if (!p.from || p.from === myIdRef.current) return
+
+        try {
+          if (p.type === "offer") {
+            if (pc.signalingState === "closed" || !p.sdp || pc.remoteDescription) return
+            await pc.setRemoteDescription(new RTCSessionDescription(p.sdp))
+            while (iceCandidateQueue.current.length > 0) {
+              const cand = iceCandidateQueue.current.shift()
+              if (cand) await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {})
+            }
+            const answer = await pc.createAnswer()
+            await pc.setLocalDescription(answer)
+            channel.send({
+              type: "broadcast",
+              event: "signal",
+              payload: {
+                type: "answer",
+                sdp: pc.localDescription?.toJSON?.() ?? { type: answer.type, sdp: answer.sdp },
+                from: myIdRef.current,
+              },
+            })
+          } else if (p.type === "answer") {
+            if (!p.sdp || pc.remoteDescription) return
+            await pc.setRemoteDescription(new RTCSessionDescription(p.sdp))
+            while (iceCandidateQueue.current.length > 0) {
+              const cand = iceCandidateQueue.current.shift()
+              if (cand) await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {})
+            }
+          } else if (p.type === "candidate" && p.candidate?.candidate) {
+            if (pc.remoteDescription) {
+              await pc.addIceCandidate(new RTCIceCandidate(p.candidate)).catch(() => {})
+            } else {
+              iceCandidateQueue.current.push(p.candidate)
+            }
+          }
+        } catch (e) {
+          console.error("[useWebRTC] signal error:", e)
         }
-
-        // Close Peer Connection
-        if (peerRef.current) {
-            peerRef.current.close();
+      })
+      .subscribe(async (status: string) => {
+        if (status === "SUBSCRIBED") {
+          await channel.track({ joined_at: new Date().toISOString() })
+          tryStartNegotiation(channel, pc, myId)
         }
+      })
 
-        // Unsubscribe from Supabase
-        if (channelRef.current) {
-            channelRef.current.unsubscribe();
-        }
+    return () => {
+      try {
+        channel.unsubscribe()
+      } catch {
+        /* ignore */
+      }
+      pc.close()
+      peerRef.current = null
+      channelRef.current = null
+      dataChannelRef.current = null
+      negotiationStartedRef.current = false
+    }
+  }, [mediaReady, myId, roomId, tryStartNegotiation])
 
-        // Reset state
-        setLocalStream(null);
-        setMediaReady(false);
-        setRemoteStream(null);
-        setConnectionStatus('disconnected');
-        setGuestStatus('idle');
-        setIsHost(false);
-        startCallRequestedRef.current = false;
-    }, [localStream]);
+  const startCall = useCallback(() => {
+    const ch = channelRef.current
+    const pc = peerRef.current
+    if (!ch || !pc || !myId) return
+    if (pc.connectionState === "connected") return
+    if (pc.connectionState === "failed") {
+      window.location.reload()
+      return
+    }
+    negotiationStartedRef.current = false
+    tryStartNegotiation(ch, pc, myId)
+  }, [myId, tryStartNegotiation])
 
-    return {
-        localStream,
-        remoteStream,
-        sendSubtitle,
-        startCall,
-        restartLocalMedia,
-        replaceLocalStream,
-        leaveCall,
-        connectionStatus,
-        error,
-        isHost,
-        guestStatus,
-        guestRequest,
-        approveGuest,
-        rejectGuest
-    };
+  const sendSubtitle = useCallback((text: string) => {
+    if (dataChannelRef.current?.readyState === "open") {
+      dataChannelRef.current.send(text)
+    }
+  }, [])
+
+  const leaveCall = useCallback(() => {
+    localStreamRef.current?.getTracks().forEach((t) => t.stop())
+    peerRef.current?.close()
+    try {
+      channelRef.current?.unsubscribe()
+    } catch {
+      /* ignore */
+    }
+    peerRef.current = null
+    channelRef.current = null
+    dataChannelRef.current = null
+    negotiationStartedRef.current = false
+    setLocalStream(null)
+    setMediaReady(false)
+    setRemoteStream(null)
+    setConnectionStatus("disconnected")
+    setError(null)
+  }, [])
+
+  return {
+    localStream,
+    remoteStream,
+    sendSubtitle,
+    startCall,
+    restartLocalMedia,
+    replaceLocalStream,
+    leaveCall,
+    connectionStatus,
+    error,
+    isHost,
+  }
 }

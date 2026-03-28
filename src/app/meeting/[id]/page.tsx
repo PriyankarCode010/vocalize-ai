@@ -1,14 +1,12 @@
 "use client"
 
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Loader2, Mic, MicOff, Camera, CameraOff, MoreHorizontal, PhoneOff } from "lucide-react"
 import type { Meeting, MeetingRequest } from "@/types/meeting"
-import MeetingRoom from "@/components/MeetingRoom"
 
 export default function MeetingLobbyPage({ params }: { params: Promise<{ id: string }> }) {
   const meetingParams = React.use(params)
@@ -27,9 +25,6 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [hostRequests, setHostRequests] = useState<MeetingRequest[]>([])
   const [toastRequest, setToastRequest] = useState<MeetingRequest | null>(null)
-  const [requestingJoin, setRequestingJoin] = useState(false)
-  const [joinRequestId, setJoinRequestId] = useState<string | null>(null)
-  const [joinStatus, setJoinStatus] = useState<"idle" | "waiting" | "approved" | "rejected">("idle")
 
   useEffect(() => {
     const init = async () => {
@@ -114,51 +109,6 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
     }
   }, [meeting, meetingId, supabase, userId])
 
-  // For non-hosts: watch our own meeting_request for approval/rejection
-  useEffect(() => {
-    const isHost = meeting && userId && meeting.host_id === userId
-    if (!meeting || !userId || isHost || !joinRequestId) {
-      if (!meeting || !userId) {
-        console.log("[lobby] not subscribing to self meeting_requests (missing meeting/user)", {
-          hasMeeting: !!meeting,
-          userId,
-          joinRequestId,
-        })
-      }
-      return
-    }
-
-    console.log("[lobby] subscribing to self meeting_requests updates", { meetingId, userId, joinRequestId })
-    const channel = supabase
-      .channel(`self-request:${joinRequestId}`)
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "meeting_requests", filter: `id=eq.${joinRequestId}` },
-        (payload: { new: MeetingRequest }) => {
-          const updated = payload.new as MeetingRequest
-          console.log("[lobby] self meeting_request UPDATE", updated)
-          if (updated.status === "approved") {
-            setJoinStatus("approved")
-            console.log("[lobby] join request approved, navigating to room")
-            router.push(`/meeting/${meetingId}/room`)
-          } else if (updated.status === "rejected") {
-            setJoinStatus("rejected")
-            console.log("[lobby] join request rejected")
-          }
-        }
-      )
-      .subscribe()
-
-    return () => {
-      try {
-        console.log("[lobby] unsubscribing self meeting_requests channel", { joinRequestId })
-        channel.unsubscribe()
-      } catch {
-        /* ignore */
-      }
-    }
-  }, [joinRequestId, meeting, meetingId, router, supabase, userId])
-
   const requestMedia = async () => {
     try {
       console.log("[lobby] requestMedia called")
@@ -239,46 +189,6 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   const isHost = meeting && userId && meeting.host_id === userId
   console.log("[lobby] render main UI", { isHost, meeting, userId, hasLocalStream: !!localStream })
 
-  const handleJoinClick = async () => {
-    if (!meeting) return
-    if (isHost) {
-      console.log("[lobby] host join click, going directly to room")
-      router.push(`/meeting/${meetingId}/room`)
-      return
-    }
-
-    if (requestingJoin || joinStatus === "waiting") {
-      console.log("[lobby] join click ignored, already requesting/waiting", { requestingJoin, joinStatus })
-      return
-    }
-
-    try {
-      setRequestingJoin(true)
-      setError(null)
-      console.log("[lobby] non-host join click, sending meeting request", { meetingId, userId })
-      const res = await fetch("/api/meeting/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meetingId }),
-      })
-      const body = await res.json().catch(() => null)
-      console.log("[lobby] meeting request response", { status: res.status, ok: res.ok, body })
-      if (!res.ok || !body?.request) {
-        setError(body?.error || "Could not send join request.")
-        setJoinStatus("idle")
-        return
-      }
-      setJoinRequestId(body.request.id as string)
-      setJoinStatus("waiting")
-    } catch (err) {
-      console.error("[lobby] meeting request failed", err)
-      setError("Could not send join request.")
-      setJoinStatus("idle")
-    } finally {
-      setRequestingJoin(false)
-    }
-  }
-
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-6 py-8">
       <div className="grid gap-8 lg:grid-cols-[2fr_1fr] w-full max-w-6xl items-center">
@@ -337,13 +247,12 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
               <Button
                 className="h-12 rounded-full text-base"
                 onClick={() => router.push(`/meeting/${meetingId}/room`)}
-                disabled={!localStream}
               >
-                Join now
+                Join call
               </Button>
-              <Button variant="outline" className="h-12 rounded-full text-base">
-                Present
-              </Button>
+              <p className="text-xs text-muted-foreground">
+                Camera and mic are requested inside the call. Two people in the same room link connect automatically.
+              </p>
             </div>
           </CardContent>
         </Card>

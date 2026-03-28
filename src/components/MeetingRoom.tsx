@@ -47,7 +47,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   const [isMounted, setIsMounted] = useState(false);
 
   // Initialize hooks
-  const { speak: speakText, stop, isSpeaking } = useSpeech();
+  const { speak: speakText } = useSpeech();
   const { 
     localSubtitles, 
     remoteSubtitles, 
@@ -58,21 +58,16 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     getSubtitleData 
   } = useSubtitles();
   
-  const { 
-    localStream, 
-    remoteStream, 
-    sendSubtitle, 
-    startCall, 
-    restartLocalMedia,
+  const {
+    localStream,
+    remoteStream,
+    sendSubtitle,
+    startCall,
     replaceLocalStream,
     connectionStatus,
     error: rtcError,
     isHost,
-    guestStatus,
-    guestRequest,
-    approveGuest,
-    rejectGuest,
-    leaveCall
+    leaveCall,
   } = useWebRTC((data) => {
     // Handle incoming remote subtitles
     try {
@@ -110,17 +105,14 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     setIsMounted(true);
   }, []);
 
-  useEffect(() => {
-      console.log(`[MeetingRoom] State Update: isHost=${isHost}, guestStatus=${guestStatus}, connection=${connectionStatus}`);
-  }, [isHost, guestStatus, connectionStatus]);
+  const aslEnabled =
+    isMounted &&
+    !isVideoOff &&
+    Boolean(typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_URL)
 
-  const { 
-    isInitialized, 
-    currentPrediction, 
-    landmarks 
-  } = useASLRecognition({ 
-    videoRef: localVideoRef, 
-    enabled: !isVideoOff && isMounted 
+  const { currentPrediction, landmarks } = useASLRecognition({
+    videoRef: localVideoRef,
+    enabled: aslEnabled,
   });
 
   // Ensure local video tracks are enabled.
@@ -135,6 +127,18 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       attachStream(localVideoRef.current, localStream);
+
+      // Debug: confirm the video element is actually rendering.
+      setTimeout(() => {
+        const v = localVideoRef.current;
+        if (!v) return;
+        console.log("VIDEO DEBUG:", {
+          width: v.videoWidth,
+          height: v.videoHeight,
+          readyState: v.readyState,
+          paused: v.paused,
+        });
+      }, 2000);
     }
   }, [localStream]);
 
@@ -256,48 +260,15 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   };
 
   const handleShare = () => {
-    navigator.clipboard.writeText(roomId).then(() => {
-        setIsCopied(true);
-        setTimeout(() => setIsCopied(false), 2000);
-    });
-  };
-
-  if (guestStatus === 'waiting') {
-      return (
-          <div className="flex flex-col h-screen items-center justify-center bg-neutral-950 text-white">
-              <h1 className="text-2xl font-bold mb-4">Waiting for Host...</h1>
-              <p className="text-neutral-400">The host has been notified of your request to join.</p>
-              <div className="mt-8 animate-pulse text-sm">Please wait...</div>
-          </div>
-      );
-  }
-
-  if (guestStatus === 'rejected') {
-      return (
-        <div className="flex flex-col h-screen items-center justify-center bg-neutral-950 text-white">
-            <h1 className="text-2xl font-bold mb-4 text-red-500">Access Denied</h1>
-            <p className="text-neutral-400">The host has declined your request to join.</p>
-        </div>
-    );
+    const link = typeof window !== "undefined" ? `${window.location.origin}/meeting/${roomId}` : roomId
+    navigator.clipboard.writeText(link).then(() => {
+      setIsCopied(true)
+      setTimeout(() => setIsCopied(false), 2000)
+    })
   }
 
   return (
     <div className="flex flex-col min-h-[calc(100vh-64px)] bg-background text-foreground p-4 relative">
-      
-      {/* Host Approval Notification */}
-      {isHost && guestRequest && (
-          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 bg-card border border-border p-4 rounded-xl shadow-2xl flex items-center gap-4 animate-in slide-in-from-top-4">
-              <div className="flex flex-col">
-                  <span className="font-bold text-sm text-foreground">Guest Requesting to Join</span>
-                  <span className="text-xs text-muted-foreground">ID: {guestRequest.slice(0, 8)}...</span>
-              </div>
-              <div className="flex gap-2">
-                  <Button size="sm" variant="destructive" onClick={() => rejectGuest(guestRequest)}>Deny</Button>
-                  <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => approveGuest(guestRequest)}>Approve</Button>
-              </div>
-          </div>
-      )}
-
       {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-xl font-bold flex items-center gap-2">
@@ -321,15 +292,18 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
                     {rtcError}
                 </span>
             )}
-            <span className={`text-xs px-2 py-1 rounded-full ${
-                connectionStatus.includes('connected') ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
-            }`}>
-                {connectionStatus}
+            <span
+              className={`text-xs px-2 py-1 rounded-full ${
+                connectionStatus.includes("connected")
+                  ? "bg-green-500/20 text-green-400"
+                  : "bg-yellow-500/20 text-yellow-400"
+              }`}
+            >
+              {connectionStatus}
             </span>
-            {/* Start Call button only needed if manual start is required, but flow is auto now */}
-            {/* <Button size="sm" onClick={startCall} variant="outline" className="text-black bg-white hover:bg-gray-200">
-                Start Call (Initiator)
-            </Button> */}
+            <Button size="sm" variant="outline" type="button" onClick={() => startCall()}>
+              Retry connect
+            </Button>
         </div>
       </div>
 
@@ -337,42 +311,51 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 relative">
         
         {/* Local Feed */}
-        <div className="relative bg-muted rounded-2xl overflow-hidden border border-border aspect-video w-full shadow-md">
-          <video 
+        <div className="w-full h-[250px] rounded-xl overflow-hidden bg-black relative">
+          <video
             key={localStream?.id}
-            ref={localVideoRef} 
-            autoPlay 
-            playsInline 
-            muted 
-            className={`absolute inset-0 w-full h-full object-cover ${isVideoOff ? 'hidden' : ''}`} 
+            ref={localVideoRef}
+            autoPlay
+            playsInline
+            muted
+            className={`w-full h-full object-cover ${isVideoOff ? "hidden" : ""}`}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              backgroundColor: "black",
+            }}
           />
+
           {!isVideoOff && (
-            <canvas 
-                ref={canvasRef}
-                className="absolute top-0 left-0 w-full h-full object-cover pointer-events-none"
-                width={640} // Should match video aspect ratio approx
-                height={480}
+            <canvas
+              ref={canvasRef}
+              className="absolute top-0 left-0 w-full h-full object-cover pointer-events-none"
+              width={640}
+              height={480}
             />
           )}
-          
+
           <div className="absolute bottom-4 left-4 right-4 bg-background/60 p-3 rounded-lg backdrop-blur-sm border border-border/50">
             <p className="text-xs text-muted-foreground mb-1">Your Sentence:</p>
-            <p className="text-lg font-medium min-h-[1.5rem]">{localSubtitles || "Start signing..."}</p>
+            <p className="text-lg font-medium min-h-[1.5rem]">
+              {localSubtitles || "Start signing..."}
+            </p>
           </div>
 
           <div className="absolute top-4 left-4 bg-background/50 px-2 py-1 rounded text-xs border border-border/30 backdrop-blur-sm">
-            You {isMuted && '(Muted)'}
+            You {isMuted && "(Muted)"}
           </div>
         </div>
 
         {/* Remote Feed */}
         <div className="relative bg-muted rounded-2xl overflow-hidden border border-border aspect-video w-full shadow-md">
-          <video 
-              ref={remoteVideoRef} 
-              autoPlay 
-              playsInline 
-              muted
-              className={`w-full h-full object-cover ${!remoteStream ? 'hidden' : ''}`} 
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            muted={false}
+            className={`w-full h-full object-cover ${!remoteStream ? "hidden" : ""}`}
           />
           
           {!remoteStream && (
