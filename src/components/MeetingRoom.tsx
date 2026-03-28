@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from "react"
 import { Mic, MicOff, Video, VideoOff, Volume2, X, Share2, Check, PhoneOff, MessageSquare } from "lucide-react"
 import { useWebRTC } from "@/hooks/useWebRTC"
 import { useASLRecognition } from "@/hooks/useASLRecognition"
-import { useSubtitles, type SubtitleWirePayload } from "@/hooks/useSubtitles"
+import { useSubtitles, type SubtitleData, type SubtitleWirePayload } from "@/hooks/useSubtitles"
 import { useMeetingChat } from "@/hooks/useMeetingChat"
 import { useSpeech } from "@/hooks/useSpeech"
 import { Button } from "@/components/ui/button"
@@ -18,6 +18,9 @@ const REMOTE_OVERLAY_IDLE_MS = 12_000
 
 /** After this long without local subtitle changes, save the current line to the Transcript (ASL rarely ends with . or !). */
 const TRANSCRIPT_LOCAL_DEBOUNCE_MS = 2200
+
+/** After signing output is stable this long, call Gemini once then send to the peer (efficient vs every frame). */
+const SUBTITLE_POLISH_DEBOUNCE_MS = 650
 
 function liveSignFromModel(current: string | null, raw: string | null): string {
   const bad = new Set(["no_sign_detected", "no sign found"])
@@ -69,6 +72,14 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   const lastPersistedLocalRef = useRef("");
   const localSubtitlesRef = useRef("");
   const transcriptDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const getSubtitleDataRef = useRef<() => SubtitleData>(() => ({
+    text: "",
+    timestamp: Date.now(),
+    isFinal: false,
+  }));
+  const subtitlePolishTimerRef = useRef<number | null>(null);
+  const subtitlePolishAbortRef = useRef<AbortController | null>(null);
+  const aslPredRef = useRef<{ c: string | null; r: string | null }>({ c: null, r: null });
 
   // Initialize hooks
   const { speak: speakText } = useSpeech();
@@ -82,6 +93,10 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     clearRemoteSubtitles,
     getSubtitleData,
   } = useSubtitles();
+
+  useEffect(() => {
+    getSubtitleDataRef.current = getSubtitleData;
+  }, [getSubtitleData]);
 
   const clearRemoteSubtitlesRef = useRef(clearRemoteSubtitles);
   useEffect(() => {
@@ -262,6 +277,8 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     enabled: aslEnabled,
   });
 
+  aslPredRef.current = { c: currentPrediction, r: rawPrediction };
+
   // Ensure local video tracks are enabled.
   useEffect(() => {
     if (!localStream) return;
@@ -367,24 +384,74 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     }
   }, [currentPrediction, addLocalPrediction, isMounted]);
 
-  // Push sentence + live backend label to peer (queued until data channel opens).
+  // Debounced Gemini polish, then send sentence + live sign label to peer (data channel).
   useEffect(() => {
-    if (!isMounted) return
+    if (!isMounted) return;
 
-    const sentence = getSubtitleData()
-    const sign = liveSignFromModel(currentPrediction, rawPrediction)
-    const payload: SubtitleWirePayload = {
-      text: sentence.text,
-      sign,
-      raw: rawPrediction && rawPrediction !== currentPrediction ? rawPrediction : null,
-      isFinal: sentence.isFinal,
-      timestamp: Date.now(),
+    subtitlePolishAbortRef.current?.abort();
+    subtitlePolishAbortRef.current = new AbortController();
+    const ac = subtitlePolishAbortRef.current;
+
+    if (subtitlePolishTimerRef.current) {
+      clearTimeout(subtitlePolishTimerRef.current);
+      subtitlePolishTimerRef.current = null;
     }
 
-    if (!payload.text.trim() && !payload.sign) return
+    subtitlePolishTimerRef.current = window.setTimeout(() => {
+      subtitlePolishTimerRef.current = null;
 
-    sendSubtitle(JSON.stringify(payload))
-  }, [localSubtitles, currentPrediction, rawPrediction, sendSubtitle, getSubtitleData, isMounted])
+      void (async () => {
+        const sentence = getSubtitleDataRef.current();
+        const text = localSubtitlesRef.current.trim();
+        const { c, r } = aslPredRef.current;
+        const sign = liveSignFromModel(c, r);
+
+        if (!text && !sign) return;
+
+        let out = text;
+        if (text) {
+          try {
+            const res = await fetch("/api/subtitles/polish", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text }),
+              signal: ac.signal,
+            });
+            if (res.ok) {
+              const j = (await res.json()) as { polished?: string };
+              if (typeof j.polished === "string" && j.polished.trim()) {
+                out = j.polished.trim();
+              }
+            }
+          } catch {
+            /* aborted or network */
+          }
+        }
+
+        if (ac.signal.aborted) return;
+
+        const payload: SubtitleWirePayload = {
+          text: out,
+          sign,
+          raw: r && r !== c ? r : null,
+          isFinal: sentence.isFinal,
+          timestamp: Date.now(),
+        };
+
+        if (!payload.text.trim() && !payload.sign) return;
+
+        sendSubtitle(JSON.stringify(payload));
+      })();
+    }, SUBTITLE_POLISH_DEBOUNCE_MS);
+
+    return () => {
+      if (subtitlePolishTimerRef.current) {
+        clearTimeout(subtitlePolishTimerRef.current);
+        subtitlePolishTimerRef.current = null;
+      }
+      ac.abort();
+    };
+  }, [localSubtitles, currentPrediction, rawPrediction, isMounted, sendSubtitle]);
 
   // Save your line to Transcript: immediately when isFinal (. ! trailing space), else after a pause while signing.
   useEffect(() => {
