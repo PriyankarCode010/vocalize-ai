@@ -7,6 +7,9 @@ import { useASLRecognition, drawLandmarks } from "@/hooks/useASLRecognition"
 import { useSubtitles, type SubtitleWirePayload } from "@/hooks/useSubtitles"
 import { useSpeech } from "@/hooks/useSpeech"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
+import type { MeetingRequest } from "@/types/meeting"
 
 function liveSignFromModel(current: string | null, raw: string | null): string {
   const bad = new Set(["no_sign_detected", "no sign found"])
@@ -97,6 +100,72 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       }
     }
   }, roomId);
+
+  const [hostJoinQueue, setHostJoinQueue] = useState<MeetingRequest[]>([])
+
+  // Host: pending join requests while in the call (same DB + Realtime as lobby)
+  useEffect(() => {
+    if (!isMounted || !roomId || !isHost) return
+    const supabase = getSupabaseBrowserClient()
+    let cancelled = false
+
+    void (async () => {
+      const { data } = await supabase
+        .from("meeting_requests")
+        .select("*")
+        .eq("meeting_id", roomId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: true })
+      if (!cancelled) {
+        setHostJoinQueue(((data ?? []) as MeetingRequest[]).sort(
+          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        ))
+      }
+    })()
+
+    const channel = supabase
+      .channel(`host-requests:${roomId}-in-call`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "meeting_requests", filter: `meeting_id=eq.${roomId}` },
+        (payload: { new: MeetingRequest }) => {
+          const row = payload.new as MeetingRequest
+          if (row.status !== "pending") return
+          setHostJoinQueue((prev) => {
+            if (prev.find((p) => p.id === row.id)) return prev
+            return [...prev, row].sort(
+              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            )
+          })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      cancelled = true
+      try {
+        channel.unsubscribe()
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [isMounted, roomId, isHost])
+
+  const handleInCallHostApproval = async (requestId: string, action: "approve" | "reject") => {
+    const endpoint = action === "approve" ? "/api/meeting/approve" : "/api/meeting/reject"
+    try {
+      await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId, meetingId: roomId }),
+      })
+    } catch {
+      /* ignore */
+    }
+    setHostJoinQueue((prev) => prev.filter((r) => r.id !== requestId))
+  }
+
+  const pendingGuestRequest = hostJoinQueue[0] ?? null
 
   // Handle client-side mounting to prevent hydration errors
   useEffect(() => {
@@ -267,8 +336,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   };
 
   const handleShare = () => {
-    const link = typeof window !== "undefined" ? `${window.location.origin}/meeting/${roomId}` : roomId
-    navigator.clipboard.writeText(link).then(() => {
+    void navigator.clipboard.writeText(roomId).then(() => {
       setIsCopied(true)
       setTimeout(() => setIsCopied(false), 2000)
     })
@@ -276,6 +344,43 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 
   return (
     <div className="flex flex-col min-h-[calc(100vh-64px)] bg-background text-foreground p-4 relative">
+      {isHost && pendingGuestRequest && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <Card className="w-full max-w-md border-2 shadow-2xl">
+            <CardContent className="p-6 space-y-4">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Guest wants to join</p>
+                <p className="text-2xl font-bold tracking-tight mt-1 break-words">
+                  {pendingGuestRequest.requester_name || pendingGuestRequest.requester_id || "Unknown guest"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">Approve to let them into this call.</p>
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  variant="destructive"
+                  className="flex-1 h-11 rounded-full"
+                  onClick={() => void handleInCallHostApproval(pendingGuestRequest.id, "reject")}
+                >
+                  Deny
+                </Button>
+                <Button
+                  className="flex-1 h-11 rounded-full"
+                  onClick={() => void handleInCallHostApproval(pendingGuestRequest.id, "approve")}
+                >
+                  Approve
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {isHost && hostJoinQueue.length > 1 && (
+        <div className="fixed bottom-20 right-4 z-[90] text-xs text-muted-foreground bg-background/80 px-2 py-1 rounded border">
+          +{hostJoinQueue.length - 1} more waiting
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-xl font-bold flex items-center gap-2">
@@ -292,7 +397,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
                 onClick={handleShare}
             >
                 {isCopied ? <Check className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
-                {isCopied ? "Copied!" : "Share Link"}
+                {isCopied ? "Copied!" : "Copy code"}
             </Button>
             {rtcError && (
                 <span className="text-xs px-2 py-1 rounded-full bg-red-500/20 text-red-500 font-bold animate-pulse">

@@ -1,51 +1,66 @@
 "use client"
 
 import React, { useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Loader2, Mic, MicOff, Camera, CameraOff, MoreHorizontal, PhoneOff } from "lucide-react"
+import { Loader2, Mic, MicOff, Camera, CameraOff, MoreHorizontal, PhoneOff, Users } from "lucide-react"
 import type { Meeting, MeetingRequest } from "@/types/meeting"
+
+/** Presence keys for people in the call (useWebRTC) are plain user ids. Lobby uses lobby:* so we can count separately. */
+function countParticipantsInCall(presenceState: Record<string, unknown>): number {
+  return Object.keys(presenceState || {}).filter((k) => k && !k.startsWith("lobby:")).length
+}
 
 export default function MeetingLobbyPage({ params }: { params: Promise<{ id: string }> }) {
   const meetingParams = React.use(params)
   const meetingId = meetingParams.id
-  console.log("[lobby] component mount, meetingId", meetingId)
   const router = useRouter()
   const supabase = useMemo(() => getSupabaseBrowserClient(), [])
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const anonLobbyRef = useRef(`anon:${crypto.randomUUID()}`)
+
   const [meeting, setMeeting] = useState<Meeting | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
+  const [displayName, setDisplayName] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [micOn, setMicOn] = useState(false)
   const [camOn, setCamOn] = useState(false)
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const [inCallCount, setInCallCount] = useState(0)
   const [hostRequests, setHostRequests] = useState<MeetingRequest[]>([])
-  const [toastRequest, setToastRequest] = useState<MeetingRequest | null>(null)
+
+  const [joinRequestId, setJoinRequestId] = useState<string | null>(null)
+  const [joinPhase, setJoinPhase] = useState<"idle" | "requesting" | "waiting" | "rejected">("idle")
+  const [joinError, setJoinError] = useState<string | null>(null)
 
   useEffect(() => {
     const init = async () => {
-      console.log("[lobby] init start", { meetingId })
       setLoading(true)
       setError(null)
 
       const { data: auth } = await supabase.auth.getUser()
-      console.log("[lobby] auth user", auth?.user)
-      setUserId(auth?.user?.id ?? null)
+      const uid = auth?.user?.id ?? null
+      setUserId(uid)
 
       const { data, error: meetingError } = await supabase.from("meetings").select("*").eq("id", meetingId).single()
       if (meetingError || !data) {
-        console.error("[lobby] meeting fetch failed", { meetingError, meetingId })
         setError("Meeting not found.")
         setLoading(false)
         return
       }
 
-      console.log("[lobby] meeting loaded", data)
       setMeeting(data as Meeting)
+
+      if (uid) {
+        const { data: profile } = await supabase.from("profiles").select("display_name").eq("id", uid).maybeSingle()
+        setDisplayName(profile?.display_name ?? auth?.user?.user_metadata?.full_name ?? null)
+      }
+
       setLoading(false)
     }
     void init()
@@ -54,7 +69,6 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   useEffect(() => {
     const attach = () => {
       if (videoRef.current && localStream) {
-        console.log("[lobby] attaching localStream to video element", localStream)
         videoRef.current.srcObject = localStream
         videoRef.current.play().catch(() => {})
       }
@@ -62,23 +76,51 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
     attach()
   }, [localStream])
 
+  // Same Realtime channel as the call: people in /room use presence key = user id; lobby uses lobby:*
   useEffect(() => {
-    if (!meeting || !userId || meeting.host_id !== userId) {
-      if (meeting && userId) {
-        console.log("[lobby] not subscribing to host requests (not host user)", {
-          meetingHostId: meeting.host_id,
-          userId,
-        })
-      } else {
-        console.log("[lobby] not subscribing to host requests (missing meeting or userId)", {
-          hasMeeting: !!meeting,
-          userId,
-        })
-      }
-      return
-    }
+    if (!meetingId) return
+    const presenceKey = userId ? `lobby:${userId}` : `lobby:${anonLobbyRef.current}`
 
-    console.log("[lobby] subscribing to host requests channel (lobby)", { meetingId, userId })
+    const channel = supabase.channel(meetingId, {
+      config: { presence: { key: presenceKey } },
+    })
+
+    channel.on("presence", { event: "sync" }, () => {
+      setInCallCount(countParticipantsInCall(channel.presenceState() as Record<string, unknown>))
+    })
+
+    channel.subscribe(async (status: string) => {
+      if (status === "SUBSCRIBED") {
+        await channel.track({ scope: "lobby", at: new Date().toISOString() })
+        setInCallCount(countParticipantsInCall(channel.presenceState() as Record<string, unknown>))
+      }
+    })
+
+    return () => {
+      try {
+        channel.unsubscribe()
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [meetingId, supabase, userId])
+
+  // Host: live join requests + initial pending rows
+  useEffect(() => {
+    if (!meeting || !userId || meeting.host_id !== userId) return
+
+    const loadPending = async () => {
+      const { data } = await supabase
+        .from("meeting_requests")
+        .select("*")
+        .eq("meeting_id", meetingId)
+        .eq("status", "pending")
+        .order("created_at", { ascending: true })
+      setHostRequests(((data ?? []) as MeetingRequest[]).sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      ))
+    }
+    void loadPending()
 
     const channel = supabase
       .channel(`host-requests:${meetingId}-lobby`)
@@ -87,21 +129,19 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
         { event: "INSERT", schema: "public", table: "meeting_requests", filter: `meeting_id=eq.${meetingId}` },
         (payload: { new: MeetingRequest }) => {
           const incoming = payload.new as MeetingRequest
-          console.log("[lobby] incoming meeting_request INSERT (lobby)", incoming)
-          if (incoming.status === "pending") {
-            setHostRequests((prev) => {
-              if (prev.find((p) => p.id === incoming.id)) return prev
-              return [...prev, incoming]
-            })
-            showJoinToast(incoming)
-          }
+          if (incoming.status !== "pending") return
+          setHostRequests((prev) => {
+            if (prev.find((p) => p.id === incoming.id)) return prev
+            return [...prev, incoming].sort(
+              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            )
+          })
         }
       )
       .subscribe()
 
     return () => {
       try {
-        console.log("[lobby] unsubscribing host requests channel (lobby)")
         channel.unsubscribe()
       } catch {
         /* ignore */
@@ -109,16 +149,45 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
     }
   }, [meeting, meetingId, supabase, userId])
 
+  // Guest: wait for approval after sending request
+  useEffect(() => {
+    const isHostUser = meeting && userId && meeting.host_id === userId
+    if (!meeting || !userId || isHostUser || !joinRequestId) return
+
+    const channel = supabase
+      .channel(`self-request:${joinRequestId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "meeting_requests", filter: `id=eq.${joinRequestId}` },
+        (payload: { new: MeetingRequest }) => {
+          const updated = payload.new as MeetingRequest
+          if (updated.status === "approved") {
+            router.push(`/meeting/${meetingId}/room`)
+          } else if (updated.status === "rejected") {
+            setJoinPhase("rejected")
+            setJoinRequestId(null)
+            setJoinError("The host declined your request to join.")
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      try {
+        channel.unsubscribe()
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [joinRequestId, meeting, meetingId, router, supabase, userId])
+
   const requestMedia = async () => {
     try {
-      console.log("[lobby] requestMedia called")
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      console.log("[lobby] media stream acquired", stream)
       setLocalStream(stream)
       setMicOn(true)
       setCamOn(true)
-    } catch (err) {
-      console.error("[lobby] requestMedia failed, permission likely denied", err)
+    } catch {
       setError("Please allow microphone and camera.")
     }
   }
@@ -126,7 +195,6 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   const toggleMic = () => {
     if (!localStream) return
     const enabled = !micOn
-    console.log("[lobby] toggleMic", { previous: micOn, next: enabled })
     localStream.getAudioTracks().forEach((t) => (t.enabled = enabled))
     setMicOn(enabled)
   }
@@ -134,37 +202,57 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
   const toggleCam = () => {
     if (!localStream) return
     const enabled = !camOn
-    console.log("[lobby] toggleCam", { previous: camOn, next: enabled })
     localStream.getVideoTracks().forEach((t) => (t.enabled = enabled))
     setCamOn(enabled)
   }
 
   const handleHostApproval = async (requestId: string, action: "approve" | "reject") => {
-    console.log("[lobby] handleHostApproval called", { requestId, action, meetingId })
     const endpoint = action === "approve" ? "/api/meeting/approve" : "/api/meeting/reject"
     try {
-      const res = await fetch(endpoint, {
+      await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requestId, meetingId }),
       })
-      const body = await res.json().catch(() => null)
-      console.log("[lobby] handleHostApproval response", { status: res.status, ok: res.ok, body })
-    } catch (err) {
-      console.error("[lobby] handleHostApproval request failed", err)
+    } catch {
+      /* ignore */
     }
     setHostRequests((prev) => prev.filter((r) => r.id !== requestId))
-    setToastRequest((current) => (current?.id === requestId ? null : current))
   }
 
-  const showJoinToast = (incoming: MeetingRequest) => {
-    console.log("[lobby] showJoinToast", incoming)
-    setToastRequest(incoming)
-    setTimeout(() => setToastRequest((current) => (current?.id === incoming.id ? null : current)), 5000)
+  const handleGuestJoin = async () => {
+    if (!meeting || !userId) return
+    if (joinPhase === "waiting" || joinPhase === "requesting") return
+    setJoinError(null)
+    setJoinPhase("requesting")
+    try {
+      const res = await fetch("/api/meeting/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          meetingId,
+          requesterName: displayName?.trim() || undefined,
+        }),
+      })
+      const body = await res.json().catch(() => null)
+      if (!res.ok || !body?.request) {
+        setJoinPhase("idle")
+        setJoinError(body?.error || "Could not send join request.")
+        return
+      }
+      setJoinRequestId(body.request.id as string)
+      setJoinPhase("waiting")
+    } catch {
+      setJoinPhase("idle")
+      setJoinError("Could not send join request.")
+    }
+  }
+
+  const handleHostEnterRoom = () => {
+    router.push(`/meeting/${meetingId}/room`)
   }
 
   if (loading) {
-    console.log("[lobby] render loading state")
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3 text-muted-foreground">
@@ -175,8 +263,7 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
     )
   }
 
-  if (error) {
-    console.log("[lobby] render error state", error)
+  if (error && !meeting) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <Card className="max-w-md w-full p-4">
@@ -186,11 +273,25 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
     )
   }
 
-  const isHost = meeting && userId && meeting.host_id === userId
-  console.log("[lobby] render main UI", { isHost, meeting, userId, hasLocalStream: !!localStream })
+  const isHost = Boolean(meeting && userId && meeting.host_id === userId)
+  const activeHostRequest = hostRequests[0] ?? null
+
+  const participantHeadline =
+    inCallCount === 0
+      ? "No one is in the call yet"
+      : inCallCount === 1
+        ? "1 person is in the call"
+        : `${inCallCount} people are in the call`
+
+  const participantSub =
+    inCallCount === 0
+      ? "You can join when you’re ready. Guests need the host to approve."
+      : "Someone is already connected. Join to talk with them."
+
+  const loginRedirect = `/login?redirect=${encodeURIComponent(`/meeting/${meetingId}`)}`
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center px-6 py-8">
+    <div className="min-h-screen bg-background flex items-center justify-center px-6 py-8 relative">
       <div className="grid gap-8 lg:grid-cols-[2fr_1fr] w-full max-w-6xl items-center">
         <Card className="bg-card border-border overflow-hidden">
           <CardContent className="p-0">
@@ -198,7 +299,7 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
               <video ref={videoRef} className="w-full aspect-video object-cover bg-neutral-900" autoPlay playsInline muted />
               {!localStream && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/80 px-6 text-center">
-                  <p className="text-lg font-semibold text-foreground">Do you want people to see and hear you in the meeting?</p>
+                  <p className="text-lg font-semibold text-foreground">Allow camera and mic for the lobby preview</p>
                   <Button onClick={requestMedia}>Allow microphone and camera</Button>
                 </div>
               )}
@@ -239,65 +340,93 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
 
         <Card>
           <CardContent className="p-6 space-y-4">
-            <div>
-              <p className="text-sm text-muted-foreground">Ready to join?</p>
-              <h2 className="text-xl font-semibold">No one else is here</h2>
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 rounded-lg bg-muted p-2">
+                <Users className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Live status</p>
+                <h2 className="text-xl font-semibold leading-tight">{participantHeadline}</h2>
+                <p className="text-sm text-muted-foreground mt-1">{participantSub}</p>
+              </div>
             </div>
+
+            {joinError && <p className="text-sm text-destructive">{joinError}</p>}
+            {error && meeting && <p className="text-sm text-destructive">{error}</p>}
+
             <div className="flex flex-col gap-3">
-              <Button
-                className="h-12 rounded-full text-base"
-                onClick={() => router.push(`/meeting/${meetingId}/room`)}
-              >
-                Join call
-              </Button>
+              {isHost ? (
+                <Button className="h-12 rounded-full text-base" onClick={handleHostEnterRoom}>
+                  Join call
+                </Button>
+              ) : !userId ? (
+                <>
+                  <p className="text-sm text-muted-foreground">Sign in so the host can see your name and approve you.</p>
+                  <Button asChild className="h-12 rounded-full text-base">
+                    <Link href={loginRedirect}>Sign in to join</Link>
+                  </Button>
+                </>
+              ) : joinPhase === "waiting" ? (
+                <div className="rounded-xl border bg-muted/40 px-4 py-6 text-center space-y-2">
+                  <Loader2 className="h-8 w-8 animate-spin mx-auto text-muted-foreground" />
+                  <p className="font-medium">Waiting for the host…</p>
+                  <p className="text-sm text-muted-foreground">You’ll enter the call when they approve.</p>
+                </div>
+              ) : joinPhase === "rejected" ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-destructive">Your request was declined.</p>
+                  <Button className="h-12 rounded-full w-full" variant="secondary" onClick={() => setJoinPhase("idle")}>
+                    Try again
+                  </Button>
+                </div>
+              ) : (
+                <Button className="h-12 rounded-full text-base" onClick={handleGuestJoin} disabled={joinPhase === "requesting"}>
+                  {joinPhase === "requesting" ? "Sending request…" : "Ask to join"}
+                </Button>
+              )}
+
               <p className="text-xs text-muted-foreground">
-                Camera and mic are requested inside the call. Two people in the same room link connect automatically.
+                The host gets a request with your name and can allow or deny. After approval, you’ll join the video call
+                automatically.
               </p>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {isHost && hostRequests.length > 0 && (
-        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-3">
-          {hostRequests.map((req) => (
-            <div key={req.id} className="rounded-lg border bg-card shadow-lg p-3 w-72">
-              <p className="text-sm font-semibold">Join request</p>
-              <p className="text-sm text-muted-foreground truncate">{req.requester_name || req.requester_id}</p>
-              <div className="mt-3 flex gap-2">
+      {/* Host: centered approval modal */}
+      {isHost && activeHostRequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <Card className="w-full max-w-md border-2 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <CardContent className="p-6 space-y-4">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Guest wants to join</p>
+                <p className="text-2xl font-bold tracking-tight mt-1 break-words">
+                  {activeHostRequest.requester_name || activeHostRequest.requester_id || "Unknown guest"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">Allow them into this meeting?</p>
+              </div>
+              <div className="flex gap-3">
                 <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => handleHostApproval(req.id, "reject")}
-                  className="flex-1"
+                  variant="destructive"
+                  className="flex-1 h-11 rounded-full"
+                  onClick={() => handleHostApproval(activeHostRequest.id, "reject")}
                 >
-                  Reject
+                  Deny
                 </Button>
-                <Button size="sm" onClick={() => handleHostApproval(req.id, "approve")} className="flex-1">
-                  Allow
+                <Button className="flex-1 h-11 rounded-full" onClick={() => handleHostApproval(activeHostRequest.id, "approve")}>
+                  Approve
                 </Button>
               </div>
-            </div>
-          ))}
+            </CardContent>
+          </Card>
         </div>
       )}
 
-      {isHost && toastRequest && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
-          <div className="rounded-lg border bg-card shadow-lg px-4 py-3 flex items-center gap-3">
-            <div>
-              <p className="text-sm font-semibold">Join request</p>
-              <p className="text-sm text-muted-foreground truncate">{toastRequest.requester_name || toastRequest.requester_id}</p>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" variant="secondary" onClick={() => handleHostApproval(toastRequest.id, "reject")}>
-                Reject
-              </Button>
-              <Button size="sm" onClick={() => handleHostApproval(toastRequest.id, "approve")}>
-                Allow
-              </Button>
-            </div>
-          </div>
+      {/* Secondary queue: small stack if multiple pending (modal shows first) */}
+      {isHost && hostRequests.length > 1 && (
+        <div className="fixed bottom-4 right-4 z-40 flex flex-col gap-2 max-w-xs text-xs text-muted-foreground">
+          +{hostRequests.length - 1} more in queue
         </div>
       )}
     </div>
