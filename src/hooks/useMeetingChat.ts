@@ -86,7 +86,13 @@ export function useMeetingChat(meetingId: string | null, enabled: boolean) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ meetingId, body: body.trim() }),
       })
-      if (res.ok) return
+      if (res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { message?: MeetingChatMessage }
+        if (j.message?.id) {
+          setMessages((prev) => (prev.some((m) => m.id === j.message!.id) ? prev : [...prev, j.message!]))
+        }
+        return
+      }
       console.warn("[useMeetingChat] persist failed", await res.text())
     },
     [meetingId]

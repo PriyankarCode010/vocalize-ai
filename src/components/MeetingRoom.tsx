@@ -16,6 +16,9 @@ import type { User } from "@supabase/supabase-js"
 /** Hide on-video remote captions after this long with no new sign/text from peer (read transcript in sidebar). */
 const REMOTE_OVERLAY_IDLE_MS = 12_000
 
+/** After this long without local subtitle changes, save the current line to the Transcript (ASL rarely ends with . or !). */
+const TRANSCRIPT_LOCAL_DEBOUNCE_MS = 2200
+
 function liveSignFromModel(current: string | null, raw: string | null): string {
   const bad = new Set(["no_sign_detected", "no sign found"])
   if (current && !bad.has(current) && current.trim()) return current.trim()
@@ -64,6 +67,8 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 
   const remoteOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPersistedLocalRef = useRef("");
+  const localSubtitlesRef = useRef("");
+  const transcriptDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Initialize hooks
   const { speak: speakText } = useSpeech();
@@ -82,6 +87,8 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   useEffect(() => {
     clearRemoteSubtitlesRef.current = clearRemoteSubtitles;
   }, [clearRemoteSubtitles]);
+
+  localSubtitlesRef.current = localSubtitles;
 
   const {
     messages: chatMessages,
@@ -379,17 +386,49 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     sendSubtitle(JSON.stringify(payload))
   }, [localSubtitles, currentPrediction, rawPrediction, sendSubtitle, getSubtitleData, isMounted])
 
+  // Save your line to Transcript: immediately when isFinal (. ! trailing space), else after a pause while signing.
   useEffect(() => {
     if (!isMounted || !roomId) return;
+
     const { text, isFinal } = getSubtitleData();
-    if (!text.trim()) {
+    const t = text.trim();
+
+    if (!t) {
       lastPersistedLocalRef.current = "";
+      if (transcriptDebounceRef.current) {
+        clearTimeout(transcriptDebounceRef.current);
+        transcriptDebounceRef.current = null;
+      }
       return;
     }
-    if (!isFinal) return;
-    if (text === lastPersistedLocalRef.current) return;
-    lastPersistedLocalRef.current = text;
-    void persistOutgoingMessage(text);
+
+    if (isFinal && t !== lastPersistedLocalRef.current) {
+      lastPersistedLocalRef.current = t;
+      void persistOutgoingMessage(t);
+      if (transcriptDebounceRef.current) {
+        clearTimeout(transcriptDebounceRef.current);
+        transcriptDebounceRef.current = null;
+      }
+      return;
+    }
+
+    if (t === lastPersistedLocalRef.current) return;
+
+    if (transcriptDebounceRef.current) clearTimeout(transcriptDebounceRef.current);
+    transcriptDebounceRef.current = setTimeout(() => {
+      transcriptDebounceRef.current = null;
+      const latest = localSubtitlesRef.current.trim();
+      if (!latest || latest === lastPersistedLocalRef.current) return;
+      lastPersistedLocalRef.current = latest;
+      void persistOutgoingMessage(latest);
+    }, TRANSCRIPT_LOCAL_DEBOUNCE_MS);
+
+    return () => {
+      if (transcriptDebounceRef.current) {
+        clearTimeout(transcriptDebounceRef.current);
+        transcriptDebounceRef.current = null;
+      }
+    };
   }, [localSubtitles, getSubtitleData, isMounted, roomId, persistOutgoingMessage]);
 
   // Don't render until mounted to prevent hydration errors
@@ -668,7 +707,14 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
          <Button 
             variant="outline" 
             className="rounded-full gap-2 hover:bg-muted"
-            onClick={() => clearLocalSubtitles()}
+            onClick={() => {
+              lastPersistedLocalRef.current = "";
+              if (transcriptDebounceRef.current) {
+                clearTimeout(transcriptDebounceRef.current);
+                transcriptDebounceRef.current = null;
+              }
+              clearLocalSubtitles();
+            }}
          >
             <X className="h-4 w-4" />
             Clear
@@ -677,11 +723,11 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
          <Button 
             className="rounded-full gap-2"
             onClick={() => {
-              if (localSubtitles) {
-                speakText(localSubtitles);
-              }
+              const line = remoteSubtitles.trim();
+              if (line) speakText(line);
             }}
-            disabled={!localSubtitles}
+            disabled={!remoteSubtitles.trim()}
+            title="Read aloud the subtitle line from the other person’s camera"
          >
             <Volume2 className="h-4 w-4" />
             Speak
