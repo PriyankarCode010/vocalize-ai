@@ -422,6 +422,9 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
               if (typeof j.polished === "string" && j.polished.trim()) {
                 out = j.polished.trim();
               }
+              if (process.env.NODE_ENV === "development" && text) {
+                console.log("[subtitles/polish client] raw:", text, "→ polished:", out);
+              }
             }
           } catch {
             /* aborted or network */
@@ -470,12 +473,17 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     }
 
     if (isFinal && t !== lastPersistedLocalRef.current) {
-      lastPersistedLocalRef.current = t;
-      void persistOutgoingMessage(t);
       if (transcriptDebounceRef.current) {
         clearTimeout(transcriptDebounceRef.current);
         transcriptDebounceRef.current = null;
       }
+      const snapshot = t;
+      void persistOutgoingMessage(snapshot).then((ok) => {
+        if (!ok) return;
+        if (localSubtitlesRef.current.trim() !== snapshot) return;
+        lastPersistedLocalRef.current = snapshot;
+        clearLocalSubtitles();
+      });
       return;
     }
 
@@ -486,8 +494,12 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       transcriptDebounceRef.current = null;
       const latest = localSubtitlesRef.current.trim();
       if (!latest || latest === lastPersistedLocalRef.current) return;
-      lastPersistedLocalRef.current = latest;
-      void persistOutgoingMessage(latest);
+      void persistOutgoingMessage(latest).then((ok) => {
+        if (!ok) return;
+        if (localSubtitlesRef.current.trim() !== latest) return;
+        lastPersistedLocalRef.current = latest;
+        clearLocalSubtitles();
+      });
     }, TRANSCRIPT_LOCAL_DEBOUNCE_MS);
 
     return () => {
@@ -496,7 +508,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
         transcriptDebounceRef.current = null;
       }
     };
-  }, [localSubtitles, getSubtitleData, isMounted, roomId, persistOutgoingMessage]);
+  }, [localSubtitles, getSubtitleData, isMounted, roomId, persistOutgoingMessage, clearLocalSubtitles]);
 
   // Don't render until mounted to prevent hydration errors
   if (!isMounted) {

@@ -29,6 +29,7 @@ export async function POST(request: Request) {
 
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
+    console.log("[subtitles/polish] no GEMINI_API_KEY — passthrough (in === out):", JSON.stringify(trimmed))
     return NextResponse.json({ polished: trimmed })
   }
 
@@ -48,9 +49,14 @@ export async function POST(request: Request) {
     const response = result.response
     let out = response.text().trim()
     out = out.replace(/^["'`]+|["'`]+$/g, "").trim()
-    return NextResponse.json({ polished: out || trimmed })
+    const polished = out || trimmed
+    console.log("[subtitles/polish] model:", modelName)
+    console.log("[subtitles/polish] IN :", trimmed)
+    console.log("[subtitles/polish] OUT:", polished)
+    return NextResponse.json({ polished })
   } catch (e) {
-    console.error("[api/subtitles/polish]", e)
+    console.error("[api/subtitles/polish] error, returning raw input:", e)
+    console.log("[subtitles/polish] IN (fallback):", trimmed)
     return NextResponse.json({ polished: trimmed })
   }
 }

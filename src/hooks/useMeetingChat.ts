@@ -79,8 +79,8 @@ export function useMeetingChat(meetingId: string | null, enabled: boolean) {
   }, [enabled, meetingId, fetchMessages])
 
   const persistOutgoingMessage = useCallback(
-    async (body: string) => {
-      if (!meetingId || !body.trim()) return
+    async (body: string): Promise<boolean> => {
+      if (!meetingId || !body.trim()) return false
       const res = await fetch("/api/meeting/chat/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -91,9 +91,10 @@ export function useMeetingChat(meetingId: string | null, enabled: boolean) {
         if (j.message?.id) {
           setMessages((prev) => (prev.some((m) => m.id === j.message!.id) ? prev : [...prev, j.message!]))
         }
-        return
+        return true
       }
       console.warn("[useMeetingChat] persist failed", await res.text())
+      return false
     },
     [meetingId]
   )
