@@ -1,16 +1,29 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 
-interface SubtitleData {
+export interface SubtitleData {
   text: string;
   timestamp: number;
   isFinal: boolean;
 }
 
+/** Payload sent over WebRTC; includes live model label for the peer's subtitles. */
+export interface SubtitleWirePayload {
+  text: string;
+  /** Latest sign label from the recognition model (live). */
+  sign?: string | null;
+  /** Raw model output before smoothing, if available. */
+  raw?: string | null;
+  isFinal: boolean;
+  timestamp: number;
+}
+
 interface UseSubtitlesReturn {
   localSubtitles: string;
   remoteSubtitles: string;
+  /** Live sign from peer's backend model (current gesture). */
+  remoteLiveSign: string;
   addLocalPrediction: (prediction: string) => void;
-  addRemoteSubtitle: (data: SubtitleData) => void;
+  addRemoteSubtitle: (data: Partial<SubtitleWirePayload> & { timestamp?: number }) => void;
   clearLocalSubtitles: () => void;
   clearRemoteSubtitles: () => void;
   getSubtitleData: () => SubtitleData;
@@ -19,6 +32,7 @@ interface UseSubtitlesReturn {
 export function useSubtitles(): UseSubtitlesReturn {
   const [localSentence, setLocalSentence] = useState<string[]>([]);
   const [remoteSubtitles, setRemoteSubtitles] = useState<string>('');
+  const [remoteLiveSign, setRemoteLiveSign] = useState<string>('');
   
   const lastWordRef = useRef<string>('');
   const lastWordTimeRef = useRef<number>(0);
@@ -117,9 +131,13 @@ export function useSubtitles(): UseSubtitlesReturn {
     });
   }, []);
 
-  // Add remote subtitle (received from other user)
-  const addRemoteSubtitle = useCallback((data: SubtitleData) => {
-    setRemoteSubtitles(data.text);
+  const addRemoteSubtitle = useCallback((data: Partial<SubtitleWirePayload> & { timestamp?: number }) => {
+    if (data.text !== undefined && data.text !== null) {
+      setRemoteSubtitles(data.text);
+    }
+    if (data.sign !== undefined) {
+      setRemoteLiveSign(data.sign ? String(data.sign) : '');
+    }
   }, []);
 
   // Clear functions
@@ -131,6 +149,7 @@ export function useSubtitles(): UseSubtitlesReturn {
 
   const clearRemoteSubtitles = useCallback(() => {
     setRemoteSubtitles('');
+    setRemoteLiveSign('');
   }, []);
 
   // Get formatted subtitle data for sending
@@ -150,10 +169,11 @@ export function useSubtitles(): UseSubtitlesReturn {
   return {
     localSubtitles,
     remoteSubtitles,
+    remoteLiveSign,
     addLocalPrediction,
     addRemoteSubtitle,
     clearLocalSubtitles,
     clearRemoteSubtitles,
-    getSubtitleData
+    getSubtitleData,
   };
 }

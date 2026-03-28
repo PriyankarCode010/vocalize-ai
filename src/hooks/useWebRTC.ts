@@ -52,6 +52,8 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
   const channelRef = useRef<RealtimeChannel | null>(null)
   const peerRef = useRef<RTCPeerConnection | null>(null)
   const dataChannelRef = useRef<RTCDataChannel | null>(null)
+  /** Subtitles sent before the data channel is open. */
+  const subtitleQueueRef = useRef<string[]>([])
   const iceCandidateQueue = useRef<RTCIceCandidateInit[]>([])
   const restartingMediaRef = useRef(false)
   const negotiationStartedRef = useRef(false)
@@ -174,6 +176,21 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
     }
   }, [replaceLocalStream])
 
+  const flushSubtitleQueue = useCallback(() => {
+    const ch = dataChannelRef.current
+    if (!ch || ch.readyState !== "open") return
+    while (subtitleQueueRef.current.length > 0) {
+      const msg = subtitleQueueRef.current.shift()
+      if (!msg) continue
+      try {
+        ch.send(msg)
+      } catch {
+        subtitleQueueRef.current.unshift(msg)
+        break
+      }
+    }
+  }, [])
+
   const tryStartNegotiation = useCallback(
     (channel: RealtimeChannel, pc: RTCPeerConnection, myPresenceKey: string) => {
       if (negotiationStartedRef.current) return
@@ -193,6 +210,7 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
           const dc = pc.createDataChannel("subtitles", { ordered: true })
           dataChannelRef.current = dc
           dc.onmessage = (e) => onSubtitleReceivedRef.current(e.data)
+          dc.onopen = () => flushSubtitleQueue()
 
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
@@ -212,7 +230,7 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
         }
       })()
     },
-    []
+    [flushSubtitleQueue]
   )
 
   // WebRTC + signaling — deps intentionally exclude meetingHostId
@@ -223,6 +241,7 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
 
     negotiationStartedRef.current = false
     iceCandidateQueue.current = []
+    subtitleQueueRef.current = []
     setRemoteStream(null)
     setConnectionStatus("signaling")
     setError(null)
@@ -283,6 +302,7 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
       const ch = event.channel
       dataChannelRef.current = ch
       ch.onmessage = (e) => onSubtitleReceivedRef.current(e.data)
+      ch.onopen = () => flushSubtitleQueue()
     }
 
     stream.getTracks().forEach((track) => {
@@ -357,9 +377,10 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
       peerRef.current = null
       channelRef.current = null
       dataChannelRef.current = null
+      subtitleQueueRef.current = []
       negotiationStartedRef.current = false
     }
-  }, [mediaReady, myId, roomId, tryStartNegotiation])
+  }, [mediaReady, myId, roomId, tryStartNegotiation, flushSubtitleQueue])
 
   const startCall = useCallback(() => {
     const ch = channelRef.current
@@ -375,8 +396,16 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
   }, [myId, tryStartNegotiation])
 
   const sendSubtitle = useCallback((text: string) => {
-    if (dataChannelRef.current?.readyState === "open") {
-      dataChannelRef.current.send(text)
+    const ch = dataChannelRef.current
+    if (ch?.readyState === "open") {
+      try {
+        ch.send(text)
+      } catch {
+        subtitleQueueRef.current.push(text)
+      }
+    } else {
+      subtitleQueueRef.current.push(text)
+      while (subtitleQueueRef.current.length > 100) subtitleQueueRef.current.shift()
     }
   }, [])
 
@@ -391,6 +420,7 @@ export function useWebRTC(onSubtitleReceived: (text: string) => void, roomId: st
     peerRef.current = null
     channelRef.current = null
     dataChannelRef.current = null
+    subtitleQueueRef.current = []
     negotiationStartedRef.current = false
     setLocalStream(null)
     setMediaReady(false)

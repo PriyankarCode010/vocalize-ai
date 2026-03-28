@@ -1,12 +1,19 @@
 "use client"
 
-import React, { useEffect, useRef, useState } from 'react';
-import { useWebRTC } from '@/hooks/useWebRTC';
-import { useASLRecognition, drawLandmarks } from '@/hooks/useASLRecognition';
-import { useSubtitles } from '@/hooks/useSubtitles';
-import { useSpeech } from '@/hooks/useSpeech';
-import { Button } from '@/components/ui/button';
-import { Mic, MicOff, Video, VideoOff, Volume2, X, Share2, Copy, Check, PhoneOff } from 'lucide-react';
+import React, { useEffect, useRef, useState } from "react"
+import { Mic, MicOff, Video, VideoOff, Volume2, X, Share2, Check, PhoneOff } from "lucide-react"
+import { useWebRTC } from "@/hooks/useWebRTC"
+import { useASLRecognition, drawLandmarks } from "@/hooks/useASLRecognition"
+import { useSubtitles, type SubtitleWirePayload } from "@/hooks/useSubtitles"
+import { useSpeech } from "@/hooks/useSpeech"
+import { Button } from "@/components/ui/button"
+
+function liveSignFromModel(current: string | null, raw: string | null): string {
+  const bad = new Set(["no_sign_detected", "no sign found"])
+  if (current && !bad.has(current) && current.trim()) return current.trim()
+  if (raw && !bad.has(raw) && raw.trim()) return raw.trim()
+  return ""
+}
 
 interface MeetingRoomProps {
   roomId: string;
@@ -48,14 +55,14 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 
   // Initialize hooks
   const { speak: speakText } = useSpeech();
-  const { 
-    localSubtitles, 
-    remoteSubtitles, 
-    addLocalPrediction, 
-    addRemoteSubtitle, 
-    clearLocalSubtitles, 
-    clearRemoteSubtitles,
-    getSubtitleData 
+  const {
+    localSubtitles,
+    remoteSubtitles,
+    remoteLiveSign,
+    addLocalPrediction,
+    addRemoteSubtitle,
+    clearLocalSubtitles,
+    getSubtitleData,
   } = useSubtitles();
   
   const {
@@ -69,33 +76,24 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     isHost,
     leaveCall,
   } = useWebRTC((data) => {
-    // Handle incoming remote subtitles
     try {
-      const parsed = JSON.parse(data);
-      
-      // Only add remote subtitles, never speak local ones
+      const parsed = JSON.parse(data) as Record<string, unknown>
+      const text = typeof parsed.text === "string" ? parsed.text : ""
+      const hasLive =
+        typeof parsed.sign === "string" || typeof parsed.raw === "string"
       addRemoteSubtitle({
-        text: parsed.text,
-        timestamp: Date.now(),
-        isFinal: parsed.isFinal || false
-      });
-      
-      // Only speak if it's marked as final and has content
-      if (parsed.isFinal && parsed.text && parsed.text.trim().length > 0) {
-        speakText(parsed.text);
-        setTimeout(() => clearRemoteSubtitles(), 2000); // Clear after 2 seconds
+        text,
+        ...(hasLive ? { sign: String(parsed.sign ?? parsed.raw ?? "") } : {}),
+        isFinal: Boolean(parsed.isFinal),
+        timestamp: typeof parsed.timestamp === "number" ? parsed.timestamp : Date.now(),
+      })
+      if (parsed.isFinal && text.trim()) {
+        speakText(text.trim())
       }
-    } catch (e) {
-      // Fallback for raw string data
-      if (data && data.trim().length > 0) {
-        addRemoteSubtitle({
-          text: data,
-          timestamp: Date.now(),
-          isFinal: true
-        });
-        
-        speakText(data);
-        setTimeout(() => clearRemoteSubtitles(), 2000); // Clear after 2 seconds
+    } catch {
+      if (data && String(data).trim().length > 0) {
+        addRemoteSubtitle({ text: String(data).trim(), sign: "", isFinal: true })
+        speakText(String(data).trim())
       }
     }
   }, roomId);
@@ -110,7 +108,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     !isVideoOff &&
     Boolean(typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_URL)
 
-  const { currentPrediction, landmarks } = useASLRecognition({
+  const { currentPrediction, rawPrediction, landmarks } = useASLRecognition({
     videoRef: localVideoRef,
     enabled: aslEnabled,
   });
@@ -215,15 +213,24 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     }
   }, [currentPrediction, addLocalPrediction, isMounted]);
 
-  // Sync Local Subtitles with Remote
+  // Push sentence + live backend label to peer (queued until data channel opens).
   useEffect(() => {
-    if (!isMounted) return;
-    
-    const subtitleData = getSubtitleData();
-    if (subtitleData.text) {
-      sendSubtitle(JSON.stringify(subtitleData));
+    if (!isMounted) return
+
+    const sentence = getSubtitleData()
+    const sign = liveSignFromModel(currentPrediction, rawPrediction)
+    const payload: SubtitleWirePayload = {
+      text: sentence.text,
+      sign,
+      raw: rawPrediction && rawPrediction !== currentPrediction ? rawPrediction : null,
+      isFinal: sentence.isFinal,
+      timestamp: Date.now(),
     }
-  }, [localSubtitles, sendSubtitle, getSubtitleData, isMounted]);
+
+    if (!payload.text.trim() && !payload.sign) return
+
+    sendSubtitle(JSON.stringify(payload))
+  }, [localSubtitles, currentPrediction, rawPrediction, sendSubtitle, getSubtitleData, isMounted])
 
   // Draw Landmarks
   useEffect(() => {
@@ -307,74 +314,78 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
         </div>
       </div>
 
-      {/* Main Grid */}
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 relative">
-        
-        {/* Local Feed */}
-        <div className="w-full h-[250px] rounded-xl overflow-hidden bg-black relative">
+      {/* Main Grid — min-h-0 lets grid children respect aspect-video without blowing layout */}
+      <div className="flex-1 grid min-h-0 grid-cols-1 md:grid-cols-2 gap-4 relative items-start">
+        {/* Local Feed — same aspect + absolute video as remote (fixes black band under stream) */}
+        <div className="relative w-full aspect-video min-h-0 rounded-2xl overflow-hidden bg-black border border-border shadow-md">
           <video
             key={localStream?.id}
             ref={localVideoRef}
             autoPlay
             playsInline
             muted
-            className={`w-full h-full object-cover ${isVideoOff ? "hidden" : ""}`}
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              backgroundColor: "black",
-            }}
+            className={`absolute inset-0 block h-full w-full min-h-full min-w-full object-cover bg-black ${isVideoOff ? "hidden" : ""}`}
           />
 
           {!isVideoOff && (
             <canvas
               ref={canvasRef}
-              className="absolute top-0 left-0 w-full h-full object-cover pointer-events-none"
+              className="absolute inset-0 block h-full w-full object-cover pointer-events-none"
               width={640}
               height={480}
             />
           )}
 
-          <div className="absolute bottom-4 left-4 right-4 bg-background/60 p-3 rounded-lg backdrop-blur-sm border border-border/50">
+          <div className="absolute bottom-3 left-3 right-3 z-10 bg-background/75 p-3 rounded-lg backdrop-blur-sm border border-border/50 shadow-sm">
             <p className="text-xs text-muted-foreground mb-1">Your Sentence:</p>
-            <p className="text-lg font-medium min-h-[1.5rem]">
+            <p className="text-lg font-medium min-h-6 leading-snug">
               {localSubtitles || "Start signing..."}
             </p>
           </div>
 
-          <div className="absolute top-4 left-4 bg-background/50 px-2 py-1 rounded text-xs border border-border/30 backdrop-blur-sm">
+          <div className="absolute top-3 left-3 z-10 bg-background/60 px-2 py-1 rounded text-xs border border-border/40 backdrop-blur-sm">
             You {isMuted && "(Muted)"}
           </div>
         </div>
 
         {/* Remote Feed */}
-        <div className="relative bg-muted rounded-2xl overflow-hidden border border-border aspect-video w-full shadow-md">
+        <div className="relative w-full aspect-video min-h-0 rounded-2xl overflow-hidden bg-muted border border-border shadow-md">
           <video
             ref={remoteVideoRef}
             autoPlay
             playsInline
             muted={false}
-            className={`w-full h-full object-cover ${!remoteStream ? "hidden" : ""}`}
+            className={`absolute inset-0 block h-full w-full min-h-full min-w-full object-cover ${!remoteStream ? "hidden" : ""}`}
           />
           
           {!remoteStream && (
-             <div className="flex items-center justify-center h-full text-muted-foreground">
-                {isHost ? "Waiting for guest to join..." : "Connecting to Host..."}
-             </div>
-          )}
-
-          {/* Remote Subtitles */}
-          {remoteSubtitles && (
-            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-popover/80 px-6 py-3 rounded-full backdrop-blur-md border border-border shadow-xl">
-               <p className="text-xl font-semibold text-center text-popover-foreground">{remoteSubtitles}</p>
+            <div className="absolute inset-0 flex items-center justify-center bg-muted text-muted-foreground text-sm px-4 text-center">
+              {isHost ? "Waiting for guest to join..." : "Connecting to Host..."}
             </div>
           )}
 
-           <div className="absolute top-4 left-4 bg-background/50 px-2 py-1 rounded text-xs flex items-center gap-2 border border-border/30">
-             <div className={`w-2 h-2 rounded-full ${remoteStream ? 'bg-green-500' : 'bg-red-500'}`} />
-             Remote User
-           </div>
+          {/* Remote: live model output + built sentence from peer */}
+          {(remoteLiveSign || remoteSubtitles) && (
+            <div className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 max-w-[95%] flex flex-col items-center gap-2 pointer-events-none">
+              {remoteLiveSign ? (
+                <div className="bg-primary/95 text-primary-foreground px-4 py-1.5 rounded-full border border-primary shadow-lg">
+                  <p className="text-xs font-medium uppercase tracking-wide opacity-90">Sign</p>
+                  <p className="text-lg font-bold text-center leading-tight">{remoteLiveSign}</p>
+                </div>
+              ) : null}
+              {remoteSubtitles ? (
+                <div className="bg-popover/90 px-5 py-2.5 rounded-2xl backdrop-blur-md border border-border shadow-xl">
+                  <p className="text-xs text-muted-foreground mb-0.5">Message</p>
+                  <p className="text-xl font-semibold text-center text-popover-foreground">{remoteSubtitles}</p>
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          <div className="absolute top-3 left-3 z-10 bg-background/60 px-2 py-1 rounded text-xs flex items-center gap-2 border border-border/40 backdrop-blur-sm">
+            <div className={`w-2 h-2 rounded-full shrink-0 ${remoteStream ? "bg-green-500" : "bg-red-500"}`} />
+            Remote User
+          </div>
         </div>
 
       </div>
