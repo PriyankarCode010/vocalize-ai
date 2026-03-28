@@ -105,7 +105,10 @@ export function useSubtitles(): UseSubtitlesReturn {
       
       // Handle "no sign detected" - add space if last character wasn't space
       if (prediction === 'no_sign_detected' || prediction === 'no sign found') {
-        if (newSentence.length > 0 && newSentence[newSentence.length - 1] !== ' ') {
+        if (newSentence.length === 0) {
+          return newSentence;
+        }
+        if (newSentence[newSentence.length - 1] !== ' ') {
           newSentence.push(' ');
         }
         return newSentence;

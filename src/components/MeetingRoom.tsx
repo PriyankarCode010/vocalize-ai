@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useRef, useState } from "react"
+import { flushSync } from "react-dom"
 import { Mic, MicOff, Video, VideoOff, Volume2, X, Share2, Check, PhoneOff, MessageSquare } from "lucide-react"
 import { useWebRTC } from "@/hooks/useWebRTC"
 import { useASLRecognition } from "@/hooks/useASLRecognition"
@@ -480,9 +481,10 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       const snapshot = t;
       void persistOutgoingMessage(snapshot).then((ok) => {
         if (!ok) return;
-        if (localSubtitlesRef.current.trim() !== snapshot) return;
         lastPersistedLocalRef.current = snapshot;
-        clearLocalSubtitles();
+        flushSync(() => {
+          clearLocalSubtitles();
+        });
       });
       return;
     }
@@ -496,9 +498,10 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       if (!latest || latest === lastPersistedLocalRef.current) return;
       void persistOutgoingMessage(latest).then((ok) => {
         if (!ok) return;
-        if (localSubtitlesRef.current.trim() !== latest) return;
         lastPersistedLocalRef.current = latest;
-        clearLocalSubtitles();
+        flushSync(() => {
+          clearLocalSubtitles();
+        });
       });
     }, TRANSCRIPT_LOCAL_DEBOUNCE_MS);
 
@@ -633,7 +636,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             autoPlay
             playsInline
             muted
-            className={`absolute inset-0 block h-full w-full min-h-full min-w-full object-cover bg-black ${isVideoOff ? "hidden" : ""}`}
+            className={`absolute inset-0 block h-full w-full min-h-full min-w-full object-cover bg-black scale-x-[-1] ${isVideoOff ? "hidden" : ""}`}
           />
 
           <div className="absolute bottom-3 left-3 right-3 z-10 bg-background/75 p-3 rounded-lg backdrop-blur-sm border border-border/50 shadow-sm">

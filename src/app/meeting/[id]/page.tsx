@@ -321,7 +321,13 @@ export default function MeetingLobbyPage({ params }: { params: Promise<{ id: str
         <Card className="bg-card border-border overflow-hidden">
           <CardContent className="p-0">
             <div className="relative">
-              <video ref={videoRef} className="w-full aspect-video object-cover bg-neutral-900" autoPlay playsInline muted />
+              <video
+                ref={videoRef}
+                className="w-full aspect-video object-cover bg-neutral-900 scale-x-[-1]"
+                autoPlay
+                playsInline
+                muted
+              />
               {!localStream && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/80 px-6 text-center">
                   <p className="text-lg font-semibold text-foreground">Allow camera and mic for the lobby preview</p>
