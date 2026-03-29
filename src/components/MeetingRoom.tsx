@@ -35,6 +35,10 @@ interface MeetingRoomProps {
   roomId: string;
 }
 
+function canSetSinkId(): boolean {
+  return typeof HTMLVideoElement !== "undefined" && "setSinkId" in HTMLVideoElement.prototype
+}
+
 /** Binds a MediaStream to a video element. Local: mutePlayback true (no echo). Remote: false so peer audio plays. */
 function attachStream(
   videoEl: HTMLVideoElement | null,
@@ -71,6 +75,9 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedVideoDeviceId, setSelectedVideoDeviceId] = useState("");
   const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState("");
+  const [audioOutputDevices, setAudioOutputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedSpeakerId, setSelectedSpeakerId] = useState("");
+  const [remotePlayBlocked, setRemotePlayBlocked] = useState(false);
   const [mediaInputsBusy, setMediaInputsBusy] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
@@ -353,6 +360,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       const list = await navigator.mediaDevices.enumerateDevices();
       setVideoInputDevices(list.filter((d) => d.kind === "videoinput"));
       setAudioInputDevices(list.filter((d) => d.kind === "audioinput"));
+      setAudioOutputDevices(list.filter((d) => d.kind === "audiooutput"));
     } catch {
       /* ignore */
     }
@@ -416,17 +424,53 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     return () => document.removeEventListener("touchstart", onTouchStart);
   }, [localStream]);
 
-  // Bind remote video — clear srcObject when peer leaves or stream drops (avoids frozen last frame).
+  // Remote video + incoming audio (desktop browsers often block unmuted autoplay until a user gesture).
   useEffect(() => {
     const el = remoteVideoRef.current
     if (!el) return
-    if (remoteStream) {
-      attachStream(el, remoteStream, false)
-    } else {
+    if (!remoteStream) {
       el.srcObject = null
       el.load?.()
+      setRemotePlayBlocked(false)
+      return
     }
+    el.srcObject = remoteStream
+    el.muted = false
+    el.volume = 1
+    el.playsInline = true
+    el.setAttribute("playsInline", "true")
+    el.autoplay = true
+    void el
+      .play()
+      .then(() => setRemotePlayBlocked(false))
+      .catch((e: DOMException) => {
+        if (e?.name === "NotAllowedError") setRemotePlayBlocked(true)
+      })
   }, [remoteStream])
+
+  // Apply speaker / output device (Chrome/Edge over HTTPS; fixes “no sound” when Windows uses the wrong endpoint).
+  useEffect(() => {
+    const el = remoteVideoRef.current
+    if (!el || !remoteStream) return
+    const v = el as HTMLVideoElement & { setSinkId?: (id: string) => Promise<void> }
+    if (typeof v.setSinkId !== "function") return
+    void v.setSinkId(selectedSpeakerId || "").catch(() => {})
+  }, [remoteStream, selectedSpeakerId])
+
+  // Any click/tap while incoming audio is blocked counts as a gesture to resume playback (PC has no touchstart).
+  useEffect(() => {
+    if (!remotePlayBlocked) return
+    const resume = () => {
+      const v = remoteVideoRef.current
+      if (!v) return
+      void v
+        .play()
+        .then(() => setRemotePlayBlocked(false))
+        .catch(() => {})
+    }
+    window.addEventListener("pointerdown", resume, { capture: true })
+    return () => window.removeEventListener("pointerdown", resume, { capture: true })
+  }, [remotePlayBlocked])
 
   const restartCamera = React.useCallback(async () => {
     try {
@@ -716,6 +760,30 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
               ))}
           </select>
         </label>
+        {canSetSinkId() && (
+          <label className="flex flex-col gap-1 min-w-[160px] flex-1 sm:max-w-[240px]">
+            <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <Volume2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Speakers
+            </span>
+            <select
+              className={selectInputClass}
+              value={selectedSpeakerId}
+              disabled={!remoteStream}
+              aria-label="Speaker output"
+              onChange={(e) => setSelectedSpeakerId(e.target.value)}
+            >
+              <option value="">Default</option>
+              {audioOutputDevices
+                .filter((d) => d.deviceId)
+                .map((d, i) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label?.trim() || `Speaker ${i + 1}`}
+                  </option>
+                ))}
+            </select>
+          </label>
+        )}
       </div>
 
       {/* Main grid + transcript sidebar */}
@@ -754,6 +822,37 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             muted={false}
             className={`absolute inset-0 block h-full w-full min-h-full min-w-full object-cover ${!remoteStream ? "hidden" : ""}`}
           />
+
+          {remoteStream && remotePlayBlocked && (
+            <div className="absolute inset-x-0 bottom-0 z-20 flex flex-col items-center gap-2 p-3 pointer-events-none">
+              <div className="rounded-lg bg-amber-950/90 text-amber-50 border border-amber-500/40 px-3 py-2 text-center text-xs max-w-[95%] shadow-lg">
+                <p className="font-medium flex items-center justify-center gap-1.5">
+                  <Volume2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Incoming audio paused by your browser
+                </p>
+                <p className="text-amber-100/90 mt-1">
+                  Click or tap anywhere on this page to hear the other person (common on desktop Chrome / Edge).
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="pointer-events-auto rounded-full shadow-md"
+                onClick={() => {
+                  const v = remoteVideoRef.current
+                  if (!v) return
+                  void v
+                    .play()
+                    .then(() => setRemotePlayBlocked(false))
+                    .catch(() => {})
+                }}
+              >
+                <Volume2 className="h-4 w-4 mr-1.5" aria-hidden />
+                Enable incoming audio
+              </Button>
+            </div>
+          )}
           
           {!remoteStream && (
             <div className="absolute inset-0 flex items-center justify-center bg-muted text-muted-foreground text-sm px-4 text-center">

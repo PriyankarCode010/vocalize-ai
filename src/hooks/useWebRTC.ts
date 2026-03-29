@@ -172,12 +172,13 @@ export function useWebRTC(
     }
   }, [])
 
+  /** `exact` when user picks a device so Windows/desktop honors the selection; `ideal` often stays on the wrong mic. */
   const getMediaConstraints = (): MediaStreamConstraints => {
     const v = preferredVideoDeviceIdRef.current
     const a = preferredAudioDeviceIdRef.current
     return {
-      video: v ? { deviceId: { ideal: v } } : true,
-      audio: a ? { deviceId: { ideal: a } } : true,
+      video: v ? { deviceId: { exact: v } } : true,
+      audio: a ? { deviceId: { exact: a }, echoCancellation: true, noiseSuppression: true } : true,
     }
   }
 
