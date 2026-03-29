@@ -67,19 +67,27 @@ export function SiteHeader() {
       setProfile(null)
       return
     }
-    const { data, error } = await supabase.from("profiles").select("id, display_name, avatar_url").eq("id", user.id).single()
-    const username = data?.display_name || user.user_metadata?.full_name || user.email || "Unknown user"
-    
-    if (data) {
-      setProfile(data as Profile)
-    } else {
-      // Create a basic profile if none exists, don't fail the header
-      setProfile({
-        id: user.id,
-        display_name: username,
-        avatar_url: null,
-      })
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("display_name")
+      .eq("id", user.id)
+      .maybeSingle()
+
+    if (error) {
+      console.warn("[SiteHeader] profiles:", error.message)
     }
+
+    const username =
+      data?.display_name?.trim() ||
+      (typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null) ||
+      user.email ||
+      "Unknown user"
+
+    setProfile({
+      id: user.id,
+      display_name: username,
+      avatar_url: null,
+    })
   }, [supabase])
 
   useEffect(() => {

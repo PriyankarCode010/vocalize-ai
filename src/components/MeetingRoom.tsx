@@ -523,47 +523,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     };
   }, [localSubtitles, getSubtitleData, isMounted, roomId, commitTranscriptLineWithPolish]);
 
-  // Don't render until mounted to prevent hydration errors
-  if (!isMounted) {
-    return (
-      <div className="flex flex-col h-screen items-center justify-center bg-neutral-950 text-white">
-        <div className="animate-pulse">Loading meeting room...</div>
-      </div>
-    );
-  }
-
-  // Toggle Mute/Video
-  const toggleMute = () => {
-    if (localStream) {
-      localStream.getAudioTracks().forEach(track => track.enabled = !track.enabled);
-      setIsMuted(!isMuted);
-    }
-  };
-
-  const toggleVideo = () => {
-    if (localStream) {
-      localStream.getVideoTracks().forEach(track => track.enabled = !track.enabled);
-      setIsVideoOff(!isVideoOff);
-    }
-  };
-
-  const handleShare = () => {
-    void navigator.clipboard.writeText(roomId).then(() => {
-      setIsCopied(true)
-      setTimeout(() => setIsCopied(false), 2000)
-    })
-  }
-
-  const handleClearTranscript = () => {
-    void voteClearHistory();
-  };
-
-  const selectInputClass = cn(
-    "border-input flex h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-2 py-1 text-sm shadow-xs",
-    "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none",
-    "disabled:opacity-50 disabled:cursor-not-allowed"
-  );
-
+  /** Must run before any conditional return — same hook count on every render. */
   const switchVideoInput = useCallback(
     async (deviceId: string) => {
       setSelectedVideoDeviceId(deviceId);
@@ -591,6 +551,47 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     },
     [applyMediaDevices, selectedVideoDeviceId, refreshMediaDeviceLists]
   );
+
+  // Don't render until mounted to prevent hydration errors
+  if (!isMounted) {
+    return (
+      <div className="flex flex-col h-screen items-center justify-center bg-neutral-950 text-white">
+        <div className="animate-pulse">Loading meeting room...</div>
+      </div>
+    );
+  }
+
+  const selectInputClass = cn(
+    "border-input flex h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-2 py-1 text-sm shadow-xs",
+    "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none",
+    "disabled:opacity-50 disabled:cursor-not-allowed"
+  );
+
+  // Toggle Mute/Video
+  const toggleMute = () => {
+    if (localStream) {
+      localStream.getAudioTracks().forEach(track => track.enabled = !track.enabled);
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const toggleVideo = () => {
+    if (localStream) {
+      localStream.getVideoTracks().forEach(track => track.enabled = !track.enabled);
+      setIsVideoOff(!isVideoOff);
+    }
+  };
+
+  const handleShare = () => {
+    void navigator.clipboard.writeText(roomId).then(() => {
+      setIsCopied(true)
+      setTimeout(() => setIsCopied(false), 2000)
+    })
+  }
+
+  const handleClearTranscript = () => {
+    void voteClearHistory();
+  };
 
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] min-h-0 bg-background text-foreground p-4 relative">
