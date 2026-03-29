@@ -10,6 +10,7 @@ import { useMeetingChat } from "@/hooks/useMeetingChat"
 import { useSpeech } from "@/hooks/useSpeech"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { cn } from "@/lib/utils"
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser"
 import type { MeetingRequest } from "@/types/meeting"
 import type { User } from "@supabase/supabase-js"
@@ -66,6 +67,11 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [videoInputDevices, setVideoInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedVideoDeviceId, setSelectedVideoDeviceId] = useState("");
+  const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState("");
+  const [mediaInputsBusy, setMediaInputsBusy] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const [localDisplayName, setLocalDisplayName] = useState<string | null>(null);
@@ -122,7 +128,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     remoteStream,
     sendSubtitle,
     startCall,
-    replaceLocalStream,
+    applyMediaDevices,
     connectionStatus,
     error: rtcError,
     isHost,
@@ -342,13 +348,43 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 
   aslPredRef.current = { c: currentPrediction, r: rawPrediction };
 
-  // Ensure local video tracks are enabled.
+  const refreshMediaDeviceLists = useCallback(async () => {
+    try {
+      const list = await navigator.mediaDevices.enumerateDevices();
+      setVideoInputDevices(list.filter((d) => d.kind === "videoinput"));
+      setAudioInputDevices(list.filter((d) => d.kind === "audioinput"));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!localStream) return;
+    void refreshMediaDeviceLists();
+  }, [localStream, refreshMediaDeviceLists]);
+
+  useEffect(() => {
+    const onDeviceChange = () => {
+      void refreshMediaDeviceLists();
+    };
+    navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange);
+  }, [refreshMediaDeviceLists]);
+
+  // Keep local track enabled flags in sync with UI (and after device switches).
   useEffect(() => {
     if (!localStream) return;
     localStream.getVideoTracks().forEach((track) => {
-      track.enabled = true;
+      track.enabled = !isVideoOff;
     });
-  }, [localStream]);
+  }, [localStream, isVideoOff]);
+
+  useEffect(() => {
+    if (!localStream) return;
+    localStream.getAudioTracks().forEach((track) => {
+      track.enabled = !isMuted;
+    });
+  }, [localStream, isMuted]);
 
   // Bind local video.
   useEffect(() => {
@@ -394,25 +430,20 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
 
   const restartCamera = React.useCallback(async () => {
     try {
-      // Prevent overlapping camera restarts (black-screen interval).
       if ((restartCamera as unknown as { _running?: boolean })._running) return;
       (restartCamera as unknown as { _running?: boolean })._running = true;
-
-      localStream?.getTracks().forEach((t) => t.stop());
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
-      newStream.getVideoTracks().forEach((track) => {
-        track.enabled = true;
-      });
-      await replaceLocalStream(newStream);
+      setMediaInputsBusy(true);
+      await applyMediaDevices(
+        selectedVideoDeviceId || null,
+        selectedAudioDeviceId || null
+      );
     } catch (err) {
       console.error("Camera restart failed:", err);
     } finally {
       (restartCamera as unknown as { _running?: boolean })._running = false;
+      setMediaInputsBusy(false);
     }
-  }, [localStream, replaceLocalStream]);
+  }, [applyMediaDevices, selectedVideoDeviceId, selectedAudioDeviceId]);
 
   // Black screen detection.
   useEffect(() => {
@@ -527,6 +558,40 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     void voteClearHistory();
   };
 
+  const selectInputClass = cn(
+    "border-input flex h-9 w-full min-w-0 max-w-full rounded-md border bg-background px-2 py-1 text-sm shadow-xs",
+    "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none",
+    "disabled:opacity-50 disabled:cursor-not-allowed"
+  );
+
+  const switchVideoInput = useCallback(
+    async (deviceId: string) => {
+      setSelectedVideoDeviceId(deviceId);
+      setMediaInputsBusy(true);
+      try {
+        await applyMediaDevices(deviceId || null, selectedAudioDeviceId || null);
+        void refreshMediaDeviceLists();
+      } finally {
+        setMediaInputsBusy(false);
+      }
+    },
+    [applyMediaDevices, selectedAudioDeviceId, refreshMediaDeviceLists]
+  );
+
+  const switchAudioInput = useCallback(
+    async (deviceId: string) => {
+      setSelectedAudioDeviceId(deviceId);
+      setMediaInputsBusy(true);
+      try {
+        await applyMediaDevices(selectedVideoDeviceId || null, deviceId || null);
+        void refreshMediaDeviceLists();
+      } finally {
+        setMediaInputsBusy(false);
+      }
+    },
+    [applyMediaDevices, selectedVideoDeviceId, refreshMediaDeviceLists]
+  );
+
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] min-h-0 bg-background text-foreground p-4 relative">
       {isHost && pendingGuestRequest && (
@@ -602,6 +667,54 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
               Retry connect
             </Button>
         </div>
+      </div>
+
+      {/* Camera / microphone selection */}
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <label className="flex flex-col gap-1 min-w-[160px] flex-1 sm:max-w-[240px]">
+          <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+            <Video className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Camera
+          </span>
+          <select
+            className={selectInputClass}
+            value={selectedVideoDeviceId}
+            disabled={!localStream || mediaInputsBusy}
+            aria-label="Camera input"
+            onChange={(e) => void switchVideoInput(e.target.value)}
+          >
+            <option value="">Default</option>
+            {videoInputDevices
+              .filter((d) => d.deviceId)
+              .map((d, i) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label?.trim() || `Camera ${i + 1}`}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 min-w-[160px] flex-1 sm:max-w-[240px]">
+          <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+            <Mic className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Microphone
+          </span>
+          <select
+            className={selectInputClass}
+            value={selectedAudioDeviceId}
+            disabled={!localStream || mediaInputsBusy}
+            aria-label="Microphone input"
+            onChange={(e) => void switchAudioInput(e.target.value)}
+          >
+            <option value="">Default</option>
+            {audioInputDevices
+              .filter((d) => d.deviceId)
+              .map((d, i) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label?.trim() || `Microphone ${i + 1}`}
+                </option>
+              ))}
+          </select>
+        </label>
       </div>
 
       {/* Main grid + transcript sidebar */}

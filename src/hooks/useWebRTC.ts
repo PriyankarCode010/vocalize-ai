@@ -43,6 +43,8 @@ export interface UseWebRTCReturn {
   sendSubtitle: (text: string) => void
   startCall: () => void
   restartLocalMedia: () => Promise<void>
+  /** Re-acquire camera/mic using these device ids; `null` = browser default for that kind. */
+  applyMediaDevices: (videoDeviceId: string | null, audioDeviceId: string | null) => Promise<void>
   replaceLocalStream: (stream: MediaStream) => Promise<void>
   leaveCall: () => void
   connectionStatus: string
@@ -80,6 +82,9 @@ export function useWebRTC(
   const subtitleQueueRef = useRef<string[]>([])
   const iceCandidateQueue = useRef<RTCIceCandidateInit[]>([])
   const restartingMediaRef = useRef(false)
+  /** Persisted across re-acquire; `null` means default device for that kind. */
+  const preferredVideoDeviceIdRef = useRef<string | null>(null)
+  const preferredAudioDeviceIdRef = useRef<string | null>(null)
   const negotiationStartedRef = useRef(false)
   const onSubtitleReceivedRef = useRef(onSubtitleReceived)
   const myIdRef = useRef("")
@@ -167,12 +172,21 @@ export function useWebRTC(
     }
   }, [])
 
+  const getMediaConstraints = (): MediaStreamConstraints => {
+    const v = preferredVideoDeviceIdRef.current
+    const a = preferredAudioDeviceIdRef.current
+    return {
+      video: v ? { deviceId: { ideal: v } } : true,
+      audio: a ? { deviceId: { ideal: a } } : true,
+    }
+  }
+
   // Local media once
   useEffect(() => {
     let mounted = true
     void (async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        const stream = await navigator.mediaDevices.getUserMedia(getMediaConstraints())
         stream.getVideoTracks().forEach((t) => {
           t.enabled = true
         })
@@ -220,22 +234,35 @@ export function useWebRTC(
     setMediaReady(true)
   }, [])
 
+  const applyMediaDevices = useCallback(
+    async (videoDeviceId: string | null, audioDeviceId: string | null) => {
+      if (restartingMediaRef.current) return
+      restartingMediaRef.current = true
+      try {
+        preferredVideoDeviceIdRef.current = videoDeviceId
+        preferredAudioDeviceIdRef.current = audioDeviceId
+        const newStream = await navigator.mediaDevices.getUserMedia(getMediaConstraints())
+        newStream.getVideoTracks().forEach((t) => {
+          t.enabled = true
+        })
+        await replaceLocalStream(newStream)
+        setError(null)
+      } catch (e) {
+        console.error("[useWebRTC] applyMediaDevices", e)
+        setError("Failed to switch camera or microphone")
+      } finally {
+        restartingMediaRef.current = false
+      }
+    },
+    [replaceLocalStream]
+  )
+
   const restartLocalMedia = useCallback(async () => {
-    if (restartingMediaRef.current) return
-    restartingMediaRef.current = true
-    try {
-      const newStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      newStream.getVideoTracks().forEach((t) => {
-        t.enabled = true
-      })
-      await replaceLocalStream(newStream)
-    } catch (e) {
-      console.error("[useWebRTC] restartLocalMedia", e)
-      setError("Failed to restart camera/microphone")
-    } finally {
-      restartingMediaRef.current = false
-    }
-  }, [replaceLocalStream])
+    await applyMediaDevices(
+      preferredVideoDeviceIdRef.current,
+      preferredAudioDeviceIdRef.current
+    )
+  }, [applyMediaDevices])
 
   const flushSubtitleQueue = useCallback(() => {
     const ch = dataChannelRef.current
@@ -549,6 +576,8 @@ export function useWebRTC(
   }, [])
 
   const leaveCall = useCallback(() => {
+    preferredVideoDeviceIdRef.current = null
+    preferredAudioDeviceIdRef.current = null
     localStreamRef.current?.getTracks().forEach((t) => t.stop())
     peerRef.current?.close()
     try {
@@ -575,6 +604,7 @@ export function useWebRTC(
     sendSubtitle,
     startCall,
     restartLocalMedia,
+    applyMediaDevices,
     replaceLocalStream,
     leaveCall,
     connectionStatus,
