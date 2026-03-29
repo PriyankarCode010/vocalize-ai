@@ -34,15 +34,17 @@ interface MeetingRoomProps {
   roomId: string;
 }
 
+/** Binds a MediaStream to a video element. Local: mutePlayback true (no echo). Remote: false so peer audio plays. */
 function attachStream(
   videoEl: HTMLVideoElement | null,
-  stream: MediaStream | null
+  stream: MediaStream | null,
+  mutePlayback = true
 ) {
   if (!videoEl || !stream) return;
   try {
     videoEl.srcObject = stream;
 
-    videoEl.muted = true;
+    videoEl.muted = mutePlayback;
     videoEl.autoplay = true;
     videoEl.playsInline = true;
 
@@ -383,7 +385,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
     const el = remoteVideoRef.current
     if (!el) return
     if (remoteStream) {
-      attachStream(el, remoteStream)
+      attachStream(el, remoteStream, false)
     } else {
       el.srcObject = null
       el.load?.()
@@ -526,7 +528,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
   };
 
   return (
-    <div className="flex flex-col min-h-[calc(100vh-64px)] bg-background text-foreground p-4 relative">
+    <div className="flex flex-col h-[calc(100vh-64px)] min-h-0 bg-background text-foreground p-4 relative">
       {isHost && pendingGuestRequest && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <Card className="w-full max-w-md border-2 shadow-2xl">
@@ -680,14 +682,14 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
       </div>
 
       <aside className="flex flex-col shrink-0 w-full lg:w-80 min-h-[260px] lg:min-h-0 lg:max-h-[calc(100vh-12rem)] border border-border rounded-2xl bg-card shadow-md overflow-hidden">
-        <div className="flex items-center gap-2 border-b border-border px-4 py-3 bg-muted/30">
+        <div className="flex items-center gap-2 border-b border-border px-4 py-3 bg-muted/30 shrink-0">
           <MessageSquare className="h-4 w-4 text-muted-foreground shrink-0" />
           <span className="font-semibold text-sm">Transcript</span>
           {chatLoading && <span className="text-xs text-muted-foreground ml-auto">Loading…</span>}
         </div>
         <div
           ref={chatListRef}
-          className="flex-1 overflow-y-auto p-3 space-y-3 min-h-[180px] lg:min-h-0"
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 space-y-3 [scrollbar-width:thin] [scrollbar-color:var(--border)_var(--muted)] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:rounded-lg [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
         >
           {chatMessages.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-6 px-2">
@@ -722,7 +724,7 @@ export default function MeetingRoom({ roomId }: MeetingRoomProps) {
             })
           )}
         </div>
-        <div className="border-t border-border p-3 space-y-2 bg-muted/20">
+        <div className="border-t border-border p-3 space-y-2 bg-muted/20 shrink-0">
           {waitingPeerClear && (
             <p className="text-xs text-muted-foreground text-center">
               Waiting for the other person to confirm clearing the transcript.
